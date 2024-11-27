@@ -126,6 +126,7 @@ define('MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING', 35);
 
 // Careful with changing these JSON COND values! They are stored.
 // If changed, DB Values need to be updated.
+define('MOD_BOOKING_BO_COND_JSON_INSTALLMEMBERS', 50);
 define('MOD_BOOKING_BO_COND_JSON_ALLOWEDTOBOOKININSTANCE', 18); // We might want to moove this up?
 define('MOD_BOOKING_BO_COND_JSON_ENROLLEDINCOHORTS', 17);
 define('MOD_BOOKING_BO_COND_JSON_CUSTOMFORM', 16);

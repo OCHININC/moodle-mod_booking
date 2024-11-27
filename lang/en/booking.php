@@ -167,6 +167,7 @@ $string['boactions_desc'] = "Booking actions after booking are still an EXPERIME
 But do not use them in a productive environment yet!";
 $string['boactionselectuserprofilefield'] = "Choose profile field";
 $string['boactionuserprofilefieldvalue'] = 'Value';
+$string['bocondinstallmembers'] = 'Install Members'; 
 $string['bocondallowedtobookininstance'] = "Booking without capability";
 $string['bocondallowedtobookininstanceanyways'] = "Allow booking without the capability 'mod/booking:choose'";
 $string['bocondallowedtobookininstanceavailable'] = 'Book it';
