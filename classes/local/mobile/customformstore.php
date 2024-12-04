@@ -135,6 +135,13 @@ class customformstore {
                         break;
                     }
                 }
+            } else if (
+                $formelement->formtype == 'enrolusersaction'
+            ) {
+                if (!(int) $data[$identifier]) {
+                    $errors[$identifier] = get_string('error:chooseint', 'mod_booking');
+                }
+
             }
             if (!empty($formelement->notempty)) {
                 if (empty($data[$identifier])) {
@@ -208,29 +215,47 @@ class customformstore {
      * @param float $price
      * @param string $priceidentifier
      *
-     * @return float
+     * @return string
      *
      */
-    public function modify_price(float $price, string $priceidentifier): float {
+    public function modify_price(float $price, string $priceidentifier): string {
         $settings = singleton_service::get_instance_of_booking_option_settings($this->itemid);
         $formdata = customform::return_formelements($settings);
         $data = (array) $this->get_customform_data(); // One of the values here indicates the right key for formdata.
         $additionalprice = 0;
 
         foreach ($formdata as $formdatakey => $formelement) {
-            if (!isset($formelement->formtype) || $formelement->formtype != 'select' || !isset($formelement->value)) {
+            if (
+                !isset($formelement->formtype) ||
+                !isset($formelement->value)
+            ) {
                 continue;
             }
-            $key = 'customform_select_' . $formdatakey;
-            $lines = explode(PHP_EOL, $formelement->value);
-            foreach ($lines as $line) {
-                $linearray = explode(' => ', $line);
-                if (isset($linearray[3]) && isset($data[$key]) && $data[$key] == $linearray[0]) {
-                    $additionalprice = $this->get_price_for_user($linearray[3]);
-                }
+            switch ($formelement->formtype) {
+                case "select":
+                    $key = 'customform_select_' . $formdatakey;
+                    $lines = explode(PHP_EOL, $formelement->value);
+                    foreach ($lines as $line) {
+                        $linearray = explode(' => ', $line);
+                        if (isset($linearray[3]) && isset($data[$key]) && $data[$key] == $linearray[0]) {
+                            $additionalprice = $this->get_price_for_user($linearray[3]);
+                        }
+                    }
+                    $price += $additionalprice;
+                    break;
+                case "enrolusersaction":
+                    $key = 'customform_enrolusersaction_' . $formdatakey;
+                    if (isset($data[$key])) {
+                        $factor = (int) $data[$key];
+                        $price = $price * $factor;
+                    }
+                    break;
+                default:
+                    break;
             }
+
         }
-        return $price + $additionalprice;
+        return number_format(round((float) $price, 2), 2, '.', '');
     }
 
     /**

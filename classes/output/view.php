@@ -128,6 +128,15 @@ class view implements renderable, templatable {
     /** @var array $elective */
     private $electivemodal = null;
 
+    /** @var bool $showheaderimageleft */
+    private $showheaderimageleft = null;
+
+    /** @var bool $showheaderimageright */
+    private $showheaderimageright = null;
+
+    /** @var bool $noheaderimage */
+    private $noheaderimage = null;
+
     /**
      * Constructor
      *
@@ -702,7 +711,17 @@ class view implements renderable, templatable {
             case MOD_BOOKING_VIEW_PARAM_CARDS:
                 self::generate_table_for_cards($wbtable, $optionsfields);
                 break;
+            case MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT:
+                $wbtable->set_template_data('showheaderimageleft', true);
+                self::generate_table_for_list($wbtable, $optionsfields);
+                break;
+            case MOD_BOOKING_VIEW_PARAM_LIST_IMG_RIGHT:
+                $wbtable->set_template_data('showheaderimageright', true);
+                self::generate_table_for_list($wbtable, $optionsfields);
+                break;
+            case MOD_BOOKING_VIEW_PARAM_LIST:
             default:
+                $wbtable->set_template_data('noheaderimage', true);
                 self::generate_table_for_list($wbtable, $optionsfields);
                 break;
         }
@@ -1052,6 +1071,12 @@ class view implements renderable, templatable {
         $wbtable->add_subcolumns('footer', $columnsfooter);
         $wbtable->add_subcolumns('rightside', ['booknow', 'course', 'progressbar', 'ratings']);
 
+        // Add header image.
+        $wbtable->add_subcolumns('headerimage', ['image']);
+        $wbtable->add_classes_to_subcolumns('headerimage', ['columnvalueclass' => 'w-100'], ['image']);
+        $wbtable->add_classes_to_subcolumns('headerimage', ['headerimagealt' => get_string('bookingoptionimage', 'mod_booking')],
+            ['image']);
+
         $wbtable->add_classes_to_subcolumns('leftside', ['columnkeyclass' => 'd-none']);
         $wbtable->add_classes_to_subcolumns(
             'leftside',
@@ -1182,6 +1207,9 @@ class view implements renderable, templatable {
             'showinvisible' => $this->showinvisible,
             'showfieldofstudy' => $this->showfieldofstudy,
             'elective' => empty($this->renderelectivetable) ? false : $this->electivemodal,
+            'showheaderimageleft' => $this->showheaderimageleft,
+            'showheaderimageright' => $this->showheaderimageright,
+            'noheaderimage' => $this->noheaderimage,
         ];
     }
 }

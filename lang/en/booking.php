@@ -479,7 +479,9 @@ $string['bookingoptionbookedotheruserwaitinglistdesc'] = 'The user with id {$thi
 $string['bookingoptionbookedsameuserdesc'] = 'The user with id {$a->userid} booked the booking option with id {$a->objectid}.';
 $string['bookingoptionbookedsameuserwaitinglistdesc'] = 'The user with id {$a->userid} booked the booking option with id {$a->objectid} on the waitinglist.';
 $string['bookingoptioncalendarentry'] = '<a href="{$a}" class="btn btn-primary">Book now...</a>';
+$string['bookingoptioncanbecancelleduntil'] = 'You can cancel until {$a}.';
 $string['bookingoptioncancelled'] = "Booking option cancelled for all";
+$string['bookingoptioncantbecancelledanymore'] = 'Cancelling was possible until {$a}.';
 $string['bookingoptioncompleted'] = 'Booking option completed';
 $string['bookingoptionconfirmed'] = 'Booking option confirmed';
 $string['bookingoptionconfirmed:description'] = 'User with ID {$a->userid} enabled booking of bookingoption {$a->objectid} for user with ID {$a->relateduserid}.';
@@ -627,6 +629,7 @@ $string['canceldependenton_desc'] = 'Choose the date that should be used as "sta
 "Disallow users to cancel their booking n days before start. Minus means, that users can still cancel n
 days AFTER course start.".<br>
 This will also set the <i>service period</i> of courses in shopping cart accordingly (if shopping cart is installed). This also affects installment payments. You can take out the semester in the Dates section of a booking option, if you want to use the coursestart instead of the semesterstart.';
+$string['cancellation'] = 'Cancellation';
 $string['cancellationsettings'] = 'Cancellation settings ' . '<span class="badge bg-success text-light"><i class="fa fa-cogs" aria-hidden="true"></i> PRO</span>';
 $string['cancelmyself'] = 'Undo my booking';
 $string['canceloption'] = "Cancel boooking option";
@@ -1025,9 +1028,22 @@ $string['enrolledinoptions'] = "already booked in booking options: ";
 $string['enrolledratings'] = 'Only enrolled';
 $string['enrolledusers'] = 'Users enrolled in course';
 $string['enrollink'] = 'Enrolment link';
+$string['enrollink:alreadyenrolled'] = 'You are already enrolled to this course and can access it';
+$string['enrollink:enrolled'] = 'Successfully enrolled';
+$string['enrollink:enrolmentexception'] = 'An error occured during the enrolment';
+$string['enrollink:invalidenrollink'] = 'Your enrolment link is invalid.';
+$string['enrollink:nomoreseats'] = 'There are no more places available in the bundle.';
+$string['enrollinktriggered'] = 'Enrol link generation triggered';
+$string['enrollinktriggered:description'] = 'The event as the basis for the automatic generation of an enrolment link has been triggered.';
 $string['enrolmentstatus'] = 'Enrol users at course start time (Default: Not checked &rarr; enrol them immediately.)';
 $string['enrolmentstatus_help'] = 'Notice: In order for automatic enrolment to work, you need to change the booking instance setting
  "Automatically enrol users" to "Yes".';
+$string['enrolmultipleusers'] = 'Enrol multiple users';
+$string['enrolusersaction:alert'] = '<div class="alert alert-info" role="alert">
+<i class="fa fa-info-circle"></i>
+<span><b>This function refers to the selected course in the Moodle Courses area..</b> <br>
+</span>
+</div>';
 $string['enteruserprofilefield'] = "Select users by entering a value for custom user profile field. Attention! This targets all the users on the plattform.";
 $string['entervalidurl'] = 'Please, enter a valid URL!';
 $string['entities'] = 'Choose places with entities plugin';
@@ -1039,6 +1055,7 @@ $string['equalsnotplain'] = 'has not exactly this value';
 $string['equalsplain'] = 'has exactly this value';
 $string['error:campaignend'] = 'Campaign end has to be after campaign start.';
 $string['error:campaignstart'] = 'Campaign start has to be before campaign end.';
+$string['error:chooseint'] = 'You have to enter a number here.';
 $string['error:choosevalue'] = 'You have to choose a value here.';
 $string['error:confirmthatyouaresure'] = 'Please confirm that you are sure.';
 $string['error:coursecategoryvaluemissing'] = 'You need to choose a value here as it is needed as course category
@@ -1320,6 +1337,7 @@ $string['linknotavailableyet'] = "The link to access the meeting is available on
 until the end of the session.";
 $string['linknotvalid'] = 'This link or meeting is not accessible.
 If it is a meeting you have booked, please check again, shortly before start.';
+$string['linktocourse'] = "Link to course";
 $string['linktomoodlecourseonbookedbutton'] = 'Show Link to Moodle course directly on booked button';
 $string['linktomoodlecourseonbookedbutton_desc'] = 'Instead of an extra link, this will transform the booked button the a link to the moodle course';
 $string['linktoshowroom:bookingrules'] = '<div class="alert alert-secondary"><i class="fa fa-lightbulb-o" aria-hidden="true"></i>&nbsp;
@@ -1823,7 +1841,7 @@ $string['progressbars_desc'] = 'Get a visual representation of the time which ha
 $string['progressbarscollapsible'] = 'Make progress bars collapsible';
 $string['prolicensefeatures'] = '<p>You need a Booking PRO license if you want to use this feature.
 Purchasing a Pro license will allow you to use the following features:</p>';
-$string['proversion:cardsview'] = 'With Booking PRO you can also use cards view.';
+$string['proversion:extraviews'] = 'With Booking PRO you can use additional views like cards view or list view with images.';
 $string['proversiononly'] = 'Upgrade to Booking PRO to use this feature.';
 $string['qrenrollink'] = "QR code for enrolment link";
 $string['qrid'] = "qr_id";
@@ -1844,6 +1862,7 @@ $string['recordsimporteddescription'] = '{$a} booking options imported via csv';
 $string['recreategroup'] = 'Recreate group in the target course and enrol users in group';
 $string['recurringheader'] = 'Recurring options';
 $string['recurringoptions'] = 'Recurring booking options';
+$string['relatedcourseidneeded'] = 'A related course is needed because of your availabilty condition(s).';
 $string['reminder1sent'] = 'First reminder sent';
 $string['reminder2sent'] = 'Second reminder sent';
 $string['reminderteachersent'] = 'Teacher reminder sent';
@@ -2321,6 +2340,8 @@ Back to overview of bookingoptions: {bookinglink}
 $string['viewparam'] = 'View type';
 $string['viewparam:cards'] = 'Cards view';
 $string['viewparam:list'] = 'List view';
+$string['viewparam:listimgleft'] = 'List view with image on the left';
+$string['viewparam:listimgright'] = 'List view with image on the right';
 $string['visibleoptions'] = 'Visible booking options';
 $string['vuebookingstatsback'] = 'Back';
 $string['vuebookingstatsbooked'] = 'Booked';

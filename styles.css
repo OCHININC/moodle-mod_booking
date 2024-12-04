@@ -439,6 +439,23 @@ if there only was one booking option. */
     object-fit: cover;
 }
 
+#page-mod-booking-view .mod-booking-view-list-image {
+    width: inherit;
+    height: 100%; /* Fallback for unsupported browsers */
+    /* stylelint-disable-next-line declaration-block-no-duplicate-properties, csstree/validator */
+    height: -webkit-fill-available; /* WebKit-specific implementation */
+    object-fit: cover;
+    max-height: 250px;
+}
+
+#page-mod-booking-view .mod-booking-view-list-image.rounded-left {
+    box-shadow: 5px 0 10px 1px rgba(0, 0, 0, 0.2);
+}
+
+#page-mod-booking-view .mod-booking-view-list-image.rounded-right {
+    box-shadow: -5px 0 10px 1px rgba(0, 0, 0, 0.2);
+}
+
 #page-mod-booking-editoptions div[id^='fgroup_id_buttonar_'] {
     position: sticky;
     bottom: 5px;

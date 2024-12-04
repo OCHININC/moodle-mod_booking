@@ -1359,6 +1359,14 @@ class booking_option {
                     'other' => $other,
                 ]);
             $event->trigger();
+
+            enrollink::trigger_enrolbot_actions(
+                $this->optionid,
+                $user->id,
+                $this->settings,
+                $ba,
+                $other['baid']
+            );
         }
 
         $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
@@ -1457,13 +1465,15 @@ class booking_option {
      * @param int $roleid
      * @param bool $isteacher true for teacher enrolments
      * @param int $courseid can override given courseid.
+     * @param bool $enrolwithoutba Enrol a user event if there is no corresponding booking answer
      */
     public function enrol_user(
         int $userid,
         bool $manual = false,
         int $roleid = 0,
         bool $isteacher = false,
-        int $courseid = 0
+        int $courseid = 0,
+        bool $enrolwithoutba = false
     ) {
         global $DB;
 
@@ -1498,7 +1508,11 @@ class booking_option {
         $bookinganswers = booking_answers::get_instance_from_optionid($this->optionid);
 
         $instance = reset($instances); // Use the first manual enrolment plugin in the course.
-        if ($bookinganswers->user_status($userid) == MOD_BOOKING_STATUSPARAM_BOOKED || $isteacher) {
+        if (
+            $bookinganswers->user_status($userid) == MOD_BOOKING_STATUSPARAM_BOOKED
+            || $isteacher
+            || $enrolwithoutba
+        ) {
             // For self-learning courses, users will be enrolled from the time booked...
             // ...until the duration of the self-learning course has passed #684.
             if (!empty($this->settings->selflearningcourse) && !$isteacher) {

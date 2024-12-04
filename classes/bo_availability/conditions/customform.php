@@ -31,6 +31,7 @@ use Exception;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
 use mod_booking\booking_option_settings;
+use mod_booking\event\enrollink_triggered;
 use mod_booking\local\mobile\customformstore;
 use mod_booking\singleton_service;
 use mod_booking\utils\wb_payment;
@@ -224,6 +225,7 @@ class customform implements bo_condition {
                 'url' => get_string('bocondcustomformurl', 'mod_booking'),
                 'mail' => get_string('bocondcustomformmail', 'mod_booking'),
                 'deleteinfoscheckboxuser' => get_string('bocondcustomformdeleteinfoscheckboxuser', 'mod_booking'),
+                'enrolusersaction' => get_string('enrolmultipleusers', 'mod_booking'),
             ];
 
             // We add four potential elements.
@@ -283,6 +285,19 @@ class customform implements bo_condition {
                         'info_about_select_options_' . $counter,
                         '',
                         get_string('customformselectoptions', 'mod_booking')
+                    );
+
+                    $mform->addElement(
+                        'static',
+                        'info_about_enrolusersaction' . $counter,
+                        '',
+                        get_string('enrolusersaction:alert', 'mod_booking'),
+                    );
+                    $mform->hideIf(
+                        'info_about_enrolusersaction' . $counter,
+                        'bo_cond_customform_select_1_' . $counter,
+                        'neq',
+                        'enrolusersaction'
                     );
                 }
 
@@ -610,12 +625,38 @@ class customform implements bo_condition {
                 "condition_customform" => $data,
             ];
             $newanswer->json = json_encode($data);
+            self::update_places_with_customformdata($data, $newanswer);
         }
 
         // We only delete the json when it's booked.
         if ($newanswer->waitinglist === MOD_BOOKING_STATUSPARAM_BOOKED) {
             $customformstore->delete_customform_data();
         }
+    }
+
+    /**
+     * Update places column in case there is a enrolusersaction field.
+     *
+     * @param mixed $data
+     * @param mixed $newanswer
+     *
+     * @return bool
+     *
+     */
+    private static function update_places_with_customformdata($data, &$newanswer): bool {
+        global $USER;
+
+        if (!isset($data->condition_customform)) {
+            return false;
+        }
+        foreach ($data->condition_customform as $key => $value) {
+            // For the moment, we only support 1 enrolusersaction field.
+            if (strpos($key, 'customform_enrolusersaction_') === 0) {
+                $newanswer->places = $value;
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -663,5 +704,35 @@ class customform implements bo_condition {
             }
         }
         return $answer;
+    }
+
+    /**
+     * This function adds error keys for form validation.
+     * @param array $data
+     * @param array $files
+     * @param array $errors
+     * @return array
+     */
+    public static function validation(array $data, array $files, array &$errors) {
+
+        if (
+            empty($data['chooseorcreatecourse'])
+            || (is_array($data['courseid']) && empty($data['courseid'][0]))
+            || empty($data['courseid'])
+        ) {
+            foreach ($data as $key => $value) {
+                // We need a courseid for the customform_enrolusersaction.
+                if (preg_match('/^bo_cond_customform_select_/', $key) && $data[$key] === "enrolusersaction") {
+                    if (empty($data['chooseorcreatecourse'])) {
+                        $errors['chooseorcreatecourse'] = get_string('relatedcourseidneeded', 'mod_booking');
+                    } else {
+                        $errors['courseid'] = get_string('relatedcourseidneeded', 'mod_booking');
+                    }
+                    return $errors;
+                }
+            }
+            return $errors;
+        }
+        return $errors;
     }
 }
