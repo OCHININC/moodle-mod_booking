@@ -127,7 +127,7 @@ class installmembers implements bo_condition {
 
             if($company) {
                 $installfield = $company->get('custom1');
-                $isinstall = $installfield === 'install';
+                $isinstall = strtolower($installfield) === 'yes';
     
                 if($isinstall) {
                     $isavailable = $isinstall;
@@ -208,7 +208,7 @@ class installmembers implements bo_condition {
      * @return void
      */
     public function add_condition_to_mform(MoodleQuickForm &$mform, int $optionid = 0) {
-        $mform->addElement('advcheckbox', 'bo_cond_installmembers_restrict', 'Restrict booking to Install Members only');
+        $mform->addElement('advcheckbox', 'bo_cond_installmembers_restrict', 'Restrict booking to Members with Live Booking access only');
         $mform->addElement('html', '<hr class="w-50"/>');
     }
 
@@ -312,7 +312,7 @@ class installmembers implements bo_condition {
         if($isavailable) {
             $description = "Able to book";
         } else {
-            $description = $full ? "Not a member of install but you have override capability" : "Booking is only possible if you submit a Jira";
+            $description = $full ? "Not a member with live booking access but you have override capability" : "Booking is only possible if you submit a Jira";
         }
 
         return $description;
