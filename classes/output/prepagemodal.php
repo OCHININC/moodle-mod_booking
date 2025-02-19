@@ -83,7 +83,7 @@ class prepagemodal implements renderable, templatable {
             $PAGE->set_context($context);
         }
 
-        if (has_capability('mod/booking:bookforothers', $context)) {
+        if (has_capability('mod/booking:overrideboconditions', $context)) {
             $full = true;
         } else {
             $full = false;

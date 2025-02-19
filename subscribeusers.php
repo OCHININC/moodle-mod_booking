@@ -205,54 +205,56 @@ if (!$agree && empty($formsubmitted) && (!empty($bookingoption->booking->setting
 }
 
 // Add the Moodle form for cohort and group subscription.
-$mform = new subscribe_cohort_or_group_form();
-$mform->set_data(['id' => $id, 'optionid' => $optionid, 'agree' => "1"]);
+$canaccessall = has_capability('moodle/site:accessallgroups', $context);
+if($canaccessall) {
+    $mform = new subscribe_cohort_or_group_form();
+    $mform->set_data(['id' => $id, 'optionid' => $optionid, 'agree' => "1"]);
 
-// Form processing and displaying is done here.
-if ($fromform = $mform->get_data()) {
+    // Form processing and displaying is done here.
+    if ($fromform = $mform->get_data()) {
 
-    $notificationstring = '';
-    $delay = 0;
-    $notificationtype = notification::NOTIFY_INFO;
+        $notificationstring = '';
+        $delay = 0;
+        $notificationtype = notification::NOTIFY_INFO;
 
-    $url = new moodle_url('/mod/booking/subscribeusers.php', ['id' => $id, 'optionid' => $optionid, 'agree' => 1]);
+        $url = new moodle_url('/mod/booking/subscribeusers.php', ['id' => $id, 'optionid' => $optionid, 'agree' => 1]);
 
-    if (!empty($fromform->cohortids) || !empty($fromform->groupids)) {
-        $result = booking_utils::book_cohort_or_group_members($fromform, $bookingoption, $context);
-        $delay = 120;
+        if (!empty($fromform->cohortids) || !empty($fromform->groupids)) {
+            $result = booking_utils::book_cohort_or_group_members($fromform, $bookingoption, $context);
+            $delay = 120;
 
-        // Generate the notification string and determine the notification color.
-        $notificationstring = get_string('resultofcohortorgroupbooking', 'mod_booking', $result);
+            // Generate the notification string and determine the notification color.
+            $notificationstring = get_string('resultofcohortorgroupbooking', 'mod_booking', $result);
 
-        if ($result->notenrolledusers > 0 || $result->notsubscribedusers > 0) {
-            $notificationstring .= get_string('problemsofcohortorgroupbooking', 'mod_booking', $result);
+            if ($result->notenrolledusers > 0 || $result->notsubscribedusers > 0) {
+                $notificationstring .= get_string('problemsofcohortorgroupbooking', 'mod_booking', $result);
 
-            if ($result->subscribedusers > 0) {
-                $notificationtype = notification::NOTIFY_WARNING;
+                if ($result->subscribedusers > 0) {
+                    $notificationtype = notification::NOTIFY_WARNING;
+                } else {
+                    $notificationtype = notification::NOTIFY_ERROR;
+                }
             } else {
-                $notificationtype = notification::NOTIFY_ERROR;
+                if ($result->subscribedusers > 0) {
+                    $notificationtype = notification::NOTIFY_SUCCESS;
+                } else {
+                    $notificationtype = notification::NOTIFY_ERROR;
+                }
             }
         } else {
-            if ($result->subscribedusers > 0) {
-                $notificationtype = notification::NOTIFY_SUCCESS;
-            } else {
-                $notificationtype = notification::NOTIFY_ERROR;
-            }
+            $notificationtype = notification::NOTIFY_ERROR;
+            $notificationstring = get_string('nogrouporcohortselected', 'mod_booking');
+            $delay = 5;
         }
-    } else {
-        $notificationtype = notification::NOTIFY_ERROR;
-        $notificationstring = get_string('nogrouporcohortselected', 'mod_booking');
-        $delay = 5;
-    }
 
-    try {
-        redirect($url, $notificationstring, $delay, $notificationtype);
-    } catch (moodle_exception $e) {
-        debugging('subscribeusers.php: Exception in redirect function.');
-    }
+        try {
+            redirect($url, $notificationstring, $delay, $notificationtype);
+        } catch (moodle_exception $e) {
+            debugging('subscribeusers.php: Exception in redirect function.');
+        }
 
+    }
 }
-
 // Under some circumstances, we don't allow direct booking of user.
 if (class_exists('local_shopping_cart\shopping_cart')
                         && !empty($optionsettings->jsonobject->useprice)
@@ -326,13 +328,15 @@ if (!empty($deletedlist)) {
     );
 }
 
+if($canaccessall) {
+    echo html_writer::tag('div',
+    html_writer::link(
+            new moodle_url('/mod/booking/report.php',
+                    ['id' => $cm->id, 'optionid' => $optionid]),
+            get_string('backtoresponses', 'booking')),
+    ['style' => 'width:100%; font-weight: bold; text-align: right;']);
+}
 
-echo html_writer::tag('div',
-        html_writer::link(
-                new moodle_url('/mod/booking/report.php',
-                        ['id' => $cm->id, 'optionid' => $optionid]),
-                get_string('backtoresponses', 'booking')),
-        ['style' => 'width:100%; font-weight: bold; text-align: right;']);
 
 if ($subscribesuccess || $unsubscribesuccess) {
     if ($subscribesuccess) {
@@ -356,7 +360,7 @@ echo $bookingoutput->subscriber_selection_form($existingselector, $subscribersel
 echo '<br>';
 
 // We separated this part of the form handling from the above part, because of the redirect function.
-if (!$fromform = $mform->get_data()) {
+if ($canaccessall && !$fromform = $mform->get_data()) {
     // This branch is executed if the form is submitted but the data doesn't validate and the form should be redisplayed...
     // ... or on the first display of the form.
     $mform->display();

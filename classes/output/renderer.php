@@ -49,6 +49,7 @@ use rating_manager;
 use popup_action;
 use stdClass;
 use templatable;
+use context_course;
 
 /**
  * A custom renderer class that extends the plugin_renderer_base and is used by the booking module.
@@ -157,11 +158,14 @@ class renderer extends plugin_renderer_base {
                     'class' => 'actionbutton',
                 ]);
         $actioncell->text .= html_writer::empty_tag('br', []);
-        $actioncell->text .= html_writer::empty_tag('input',
+        $context = context_course::instance($courseid);
+        if(has_capability('mod/booking:deleteresponses',  $context)) {
+            $actioncell->text .= html_writer::empty_tag('input',
                 ['type' => 'submit', 'name' => 'unsubscribe',
                     'value' => $this->page->theme->rarrow . ' ' . get_string('remove'),
                     'class' => 'actionbutton',
                 ]);
+        }
         $actioncell->text .= html_writer::end_tag('div', []);
         $actioncell->attributes['class'] = 'actions';
         $potentialcell = new html_table_cell();

@@ -115,7 +115,7 @@ class booking_subbookit {
                     // Here we could use a more sophisticated way of rights management.
                     // Right now, the logic is just linked to one right.
                     $context = context_module::instance(($settings->cmid));
-                    if (has_capability('mod/booking:bookforothers', $context)) {
+                    if (has_capability('mod/booking:overrideboconditions', $context)) {
                         // We still render the alert, but just in supplement to the other butotn.
                         $extrabuttoncondition = $result['classname'];
                     } else {
@@ -131,7 +131,7 @@ class booking_subbookit {
         }
 
         $context = context_module::instance($settings->cmid);
-        if (has_capability('mod/booking:bookforothers', $context)) {
+        if (has_capability('mod/booking:overrideboconditions', $context)) {
             $full = true;
         } else {
             $full = false;
@@ -174,7 +174,7 @@ class booking_subbookit {
         $context = context_system::instance();
         if (!empty($userid)
             && $userid != $USER->id
-            && !has_capability('mod/booking:bookforothers', $context)) {
+            && !has_capability('mod/booking:overrideboconditions', $context)) {
             throw new moodle_exception('norighttoaccess', 'mod_booking');
         }
 

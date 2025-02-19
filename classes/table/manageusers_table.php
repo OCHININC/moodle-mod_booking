@@ -178,7 +178,7 @@ class manageusers_table extends wunderbyte_table {
 
         $context = context_module::instance($settings->cmid);
 
-        if (has_capability('mod/booking:bookforothers', $context)) {
+        if (has_capability('mod/booking:overrideboconditions', $context)) {
 
             $option = singleton_service::get_instance_of_booking_option($settings->cmid, $optionid);
             $user = singleton_service::get_instance_of_user($userid);
@@ -235,7 +235,7 @@ class manageusers_table extends wunderbyte_table {
 
         $context = context_module::instance($settings->cmid);
 
-        if (has_capability('mod/booking:bookforothers', $context)) {
+        if (has_capability('mod/booking:overrideboconditions', $context)) {
 
             $option = singleton_service::get_instance_of_booking_option($settings->cmid, $optionid);
             $user = singleton_service::get_instance_of_user($userid);
@@ -273,7 +273,7 @@ class manageusers_table extends wunderbyte_table {
 
         $context = context_module::instance($settings->cmid);
 
-        if (has_capability('mod/booking:bookforothers', $context)) {
+        if (has_capability('mod/booking:overrideboconditions', $context)) {
 
             $option = singleton_service::get_instance_of_booking_option($settings->cmid, $optionid);
 
