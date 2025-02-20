@@ -16,6 +16,7 @@ Feature: Create booking campaigns for booking options as admin and booking it as
       | teacher1 | C1     | manager        |
       | student1 | C1     | student        |
       | student2 | C1     | student        |
+    And I clean booking cache
     And the following "activities" exist:
       | activity | course | name       | intro               | bookingmanager | eventtype | Default view for booking options | Send confirmation e-mail |
       | booking  | C1     | BookingCMP | Booking description | teacher1       | Webinar   | All bookings                     | Yes                      |
@@ -61,6 +62,32 @@ Feature: Create booking campaigns for booking options as admin and booking it as
     And I click on "Save changes" "button"
     And I wait until the page is ready
     And I should see "campaign1"
+
+  @javascript
+  Scenario: Booking campaigns: create settings for blooking booking campaign via UI as admin and edit it
+    Given I log in as "admin"
+    And I visit "/mod/booking/edit_campaigns.php"
+    And I click on "Add campaign" "text"
+    And I set the field "Campaign type" to "Block certain booking options"
+    And I set the following fields to these values:
+      | Custom name for the campaign   | blogcampaing1      |
+      | endtime[year]                  | ## + 1 year ##%Y## |
+      | blockoperator                  | blockabove         |
+      | Percentage of available places | 30                 |
+      | Message when blocking          | BlockAbove30       |
+    ## Mandatory workaround for autocomplete field
+    And I set the field "Booking option field" to "Sport1"
+    And I wait "1" seconds
+    And I set the field "Value" to "tenis"
+    And I click on "Save changes" "button"
+    And I wait until the page is ready
+    And I should see "blogcampaing1"
+    And I click on "Edit" "text" in the ".booking-campaigns-list" "css_element"
+    And I wait "1" seconds
+    And I set the field "Custom name for the campaign" to "blockingcampaing1"
+    And I click on "Save changes" "button"
+    And I wait until the page is ready
+    And I should see "blockingcampaing1"
 
   ## @javascript - JS no need for this test
   Scenario: Booking campaigns: create booking campaign via DB and view as teacher

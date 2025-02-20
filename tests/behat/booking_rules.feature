@@ -25,6 +25,7 @@ Feature: Create global booking rules as admin and insure they are working.
       | student2 | C1     | student        |
       | student3 | C1     | student        |
       | student4 | C1     | student        |
+    And I clean booking cache
     And the following "activities" exist:
       | activity | course | name       | intro               | bookingmanager | eventtype | Default view for booking options | Send confirmation e-mail |
       | booking  | C1     | BookingCMP | Booking description | teacher1       | Webinar   | All bookings                     | Yes                      |
@@ -124,7 +125,7 @@ Feature: Create global booking rules as admin and insure they are working.
     And I am on the "BookingCMP" Activity page
     And I click on "Settings" "icon" in the ".allbookingoptionstable_r1" "css_element"
     And I click on "Cancel this booking option" "link" in the ".allbookingoptionstable_r1" "css_element"
-    And I set the field "Reason for cancelation of this booking option" to "rule testing"
+    And I set the field "Reason for cancellation of this booking option" to "rule testing"
     And I click on "Save changes" "button"
     And I should see "Option-football" in the ".allbookingoptionstable_r1" "css_element"
     And I should see "Cancelled" in the ".allbookingoptionstable_r1" "css_element"
@@ -258,7 +259,7 @@ Feature: Create global booking rules as admin and insure they are working.
     When I am on the "BookingCMP" Activity page logged in as admin
     And I click on "Settings" "icon" in the ".allbookingoptionstable_r1" "css_element"
     And I click on "Cancel this booking option" "link" in the ".allbookingoptionstable_r1" "css_element"
-    And I set the field "Reason for cancelation of this booking option" to "rule testing"
+    And I set the field "Reason for cancellation of this booking option" to "rule testing"
     And I click on "Save changes" "button"
     And I should see "Option-football" in the ".allbookingoptionstable_r1" "css_element"
     And I should see "Cancelled" in the ".allbookingoptionstable_r1" "css_element"
@@ -405,7 +406,7 @@ Feature: Create global booking rules as admin and insure they are working.
     When I am on the "BookingCMP" Activity page logged in as admin
     And I click on "Settings" "icon" in the ".allbookingoptionstable_r1" "css_element"
     And I click on "Cancel this booking option" "link" in the ".allbookingoptionstable_r1" "css_element"
-    And I set the field "Reason for cancelation of this booking option" to "rule testing"
+    And I set the field "Reason for cancellation of this booking option" to "rule testing"
     And I click on "Save changes" "button"
     And I should see "Option-football" in the ".allbookingoptionstable_r1" "css_element"
     And I should see "Cancelled" in the ".allbookingoptionstable_r1" "css_element"

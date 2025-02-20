@@ -122,6 +122,7 @@ class booking {
 
         // If the course has groups and I do not have the capability to see all groups, show only
         // users of my groups.
+        // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
         // TODO: Move this potentially expensive function to settings and, with its own cache.
         // It needs to use the live information from cm & context and be invalidated by group change events in this course.
         if (groups_get_activity_groupmode($this->cm) == SEPARATEGROUPS &&
@@ -389,6 +390,7 @@ class booking {
 
         $this->canbookusers = get_enrolled_users($this->context, 'mod/booking:choose', null, 'u.id');
 
+        // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
         // TODO check if course has guest access if not get all enrolled users and check with...
         // ...has_capability if user has right to book.
         // CODEBEGIN $this->canbookusers = get_users_by_capability($this->context, 'mod/booking:choose', CODEEND.
@@ -1198,7 +1200,7 @@ class booking {
 
                 $where .= " AND ( ";
                 $orstring = [];
-
+                // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
                 // TODO: This could be replaced with in or equal, but not sure of if its worth it.
                 foreach ($value as $arrayvalue) {
 
@@ -1335,6 +1337,7 @@ class booking {
         global $CFG;
 
         // See github issue: https://github.com/Wunderbyte-GmbH/moodle-mod_booking/issues/305.
+        // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
         // TODO: We currently encode the whole URL, but we should only encode the params.
         // Encoding the whole URL makes migration to a new WWWROOT impossible.
 
@@ -1357,6 +1360,7 @@ class booking {
      */
     public static function return_array_of_entity_dates(array $areas): array {
 
+        // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
         // TODO: Now that the SQL has been changed, we need to fix this function!
 
         global $DB, $USER, $PAGE;
@@ -1745,5 +1749,73 @@ class booking {
             // Make sure, we destroy singletons too.
             singleton_service::destroy_booking_singleton_by_cmid($cmid);
         }
+    }
+
+    /**
+     * Helper function to generate label descriptions, e.g. for navigation elements.
+     * @param string $prefix prefix for classes, e.g. the name of the moodle page like "report2"
+     * @param array $scopes an array of scopes, e.g. ["option", "instance", "course", "system"]
+     * @return string styling css embedded in html (with surrounding <style> element)
+     */
+    public static function generate_localized_css_for_navigation_labels(string $prefix, array $scopes) {
+        $css = "";
+
+        $last = end($scopes);
+
+        foreach ($scopes as $scope) {
+            $islast = ($last == $scope);
+            $css .= '
+            .' . $prefix . "-" . $scope . '-border::before {
+                content: "' . get_string($prefix . 'label' . $scope, 'mod_booking') . '";
+                position: absolute;
+                top: -10px;
+                padding: 0 5px;
+                font-weight: 200;
+                font-size: small;
+                background-color: white;
+                color: ' . ($islast ? '#000' : '#333') . ';
+                white-space: nowrap;
+            }
+            .' . $prefix . '-' . $scope . '-border {
+                display: inline-block;
+                position: relative;
+                padding: 10px 20px;
+                margin-bottom: 10px;
+                border: ' . ($islast ? '1px solid black' : '1px dashed gray') . ';
+                border-radius: 5px;
+                color: ' . ($islast ? '#0f6cbf' : 'gray') . ';
+                font-size: large;
+                font-weight: lighter;
+                white-space: nowrap;
+            }
+            ';
+        }
+
+        return "<style>$css</style>";
+    }
+
+    /**
+     * Helper function to shorten long texts and add 3 dots "..." at the end.
+     * @param string $text input text to be shortened
+     * @param int $length maximum length after which the "..." should be added
+     * @return string the return string, e.g. "Lorem ipsum..."
+     */
+    public static function shorten_text($text, $length = 20) {
+        return (strlen($text) > $length) ? substr($text, 0, $length) . "..." : $text;
+    }
+
+    /**
+     * Helper function to get an array of all available booking cmids.
+     * @return array all cmids of booking instances
+     */
+    public static function get_all_cmids() {
+        global $DB;
+        $sql = "SELECT cm.id AS cmid
+                  FROM {course_modules} cm
+                  JOIN {modules} m
+                    ON m.id = cm.module
+                   AND m.name = 'booking'
+              ORDER BY cm.id DESC";
+        return $DB->get_fieldset_sql($sql);
     }
 }

@@ -542,7 +542,8 @@ class booking_option {
         // If $bookanyone is true, we do not check for enrolment.
         $this->bookedusers = $bookanyone ? $allanswers : array_intersect_key($allanswers, $this->booking->canbookusers);
 
-        // TODO offer users with according caps to delete excluded users from booking option.
+        // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
+        // TODO: Offer users with according caps to delete excluded users from booking option.
         $this->numberofanswers = count($this->bookedusers);
         if (groups_get_activity_groupmode($this->booking->cm) == SEPARATEGROUPS &&
                  !has_capability('moodle/site:accessallgroups',
@@ -654,8 +655,13 @@ class booking_option {
      * @param bool $deleteall set this to true if you want to delete a complete answers too
      * @return bool true if booking was deleted successfully, otherwise false
      */
-    public function user_delete_response($userid, $cancelreservation = false,
-        $bookingoptioncancel = false, $syncwaitinglist = true, $deleteall = false) {
+    public function user_delete_response(
+        $userid,
+        $cancelreservation = false,
+        $bookingoptioncancel = false,
+        $syncwaitinglist = true,
+        $deleteall = false
+    ) {
 
         global $USER, $DB;
 
@@ -688,12 +694,15 @@ class booking_option {
         }
 
         if ($cancelreservation) {
-            $DB->delete_records('booking_answers',
-                    ['userid' => $userid,
-                      'optionid' => $this->optionid,
-                      'completed' => 0,
-                      'waitinglist' => MOD_BOOKING_STATUSPARAM_RESERVED,
-                    ]);
+            $DB->delete_records(
+                'booking_answers',
+                [
+                    'userid' => $userid,
+                    'optionid' => $this->optionid,
+                    'completed' => 0,
+                    'waitinglist' => MOD_BOOKING_STATUSPARAM_RESERVED,
+                ]
+            );
         } else {
             foreach ($results as $result) {
                 if ($result->waitinglist != MOD_BOOKING_STATUSPARAM_DELETED) {
@@ -752,11 +761,11 @@ class booking_option {
         // If a whole booking option was cancelled, we can use the new global booking rules...
         // ...and react to the event bookingoption_cancelled instead.
         if (!$bookingoptioncancel) {
-
             if ($userid == $USER->id) {
                 // Participant cancelled the booking herself.
                 $msgparam = MOD_BOOKING_MSGPARAM_CANCELLED_BY_PARTICIPANT;
 
+                // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
                 // TODO: Trigger event.
             } else {
                 // An admin user cancelled the booking.
@@ -1477,6 +1486,11 @@ class booking_option {
     ) {
         global $DB;
 
+        if (!$isteacher) {
+            // Second check to make sure the user is really no teacher of this option.
+            $isteacher = booking_check_if_teacher($this->optionid, $userid);
+        }
+
         $bookingsettings = singleton_service::get_instance_of_booking_settings_by_bookingid($this->bookingid);
         if (!$manual) {
             if (!$bookingsettings->autoenrol) {
@@ -1515,10 +1529,11 @@ class booking_option {
         ) {
             // For self-learning courses, users will be enrolled from the time booked...
             // ...until the duration of the self-learning course has passed #684.
+            // Use booking_check_if_teacher here instead of $isteacher to make this independent of the function call.
             if (!empty($this->settings->selflearningcourse) && !$isteacher) {
                 $now = time();
                 $duration = $this->settings->duration ?? 0;
-                $end = $now + $duration;
+                $end = empty($duration) ? 0 : $now + $duration;
                 // Enrol using the default role from now until now + duration.
                 $enrol->enrol_user(
                     $instance,
@@ -1528,11 +1543,11 @@ class booking_option {
                     $end
                 );
             } else if (empty($this->settings->semesterid) || $isteacher) {
-                // If a semester is set for the booking option...
-                // ...then we only want to enrol from semester startdate to semester enddate.
                 // Enrol using the default role.
                 $enrol->enrol_user($instance, $userid, ($roleid > 0 ? $roleid : $instance->roleid));
             } else {
+                // If a semester is set for the booking option...
+                // ...then we only want to enrol from semester startdate to semester enddate.
                 if ($semesterobj = $DB->get_record('booking_semesters', ['id' => $this->settings->semesterid])) {
                     // Enrol using the default role from semester start until semester end.
                     $enrol->enrol_user(
@@ -2536,6 +2551,7 @@ class booking_option {
             // 0 in a date id means it comes form normal course start & endtime.
             // Therefore, there can't be these customfields.
             if ($withcustomfields && $date->id !== 0) {
+                // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
                 // TODO: Can we cache this?
                 // Filter the matching customfields.
                 $returnsession['customfields'] = self::return_array_of_customfields(
@@ -2930,7 +2946,7 @@ class booking_option {
 
         if (count($optionsettings->sessions) == 1) {
             // Single-session.
-            $session = array_pop($optionsettings->sessions);
+            $session = reset($optionsettings->sessions);
 
             // If there's only one session and it's already over, then we count it as consumed.
             if ($session->courseendtime < $now) {
@@ -3038,6 +3054,7 @@ class booking_option {
     public static function purge_cache_for_answers(int $optionid) {
 
         cache_helper::invalidate_by_event('setbackoptionsanswers', [$optionid]);
+        cache_helper::purge_by_event('setbacksessionanswers');
         // When we set back the booking_answers...
         // ... we have to make sure it's also deleted in the singleton service.
         singleton_service::destroy_booking_answers($optionid);
@@ -3113,16 +3130,22 @@ class booking_option {
         $allowupdatedays = $bookingsettings->allowupdatedays;
         if (
             !empty($bookingsettings->cancelrelativedate) &&
+            $bookingsettings->cancelrelativedate == 1 &&
             isset($allowupdatedays) &&
             $allowupdatedays != 10000 &&
             !empty($starttime)
         ) {
             // Different string depending on plus or minus.
-            if ($allowupdatedays >= 0) {
-                $datestring = " - $allowupdatedays days";
+            if ($allowupdatedays == 0) {
+                // We cancel exact until (option's) start time.
+                return $starttime;
+            } else if ($allowupdatedays > 0) {
+                $allowupdatedays--; // Value over 0 means days before $startdays.
+                $datestring = "midnight - $allowupdatedays days";
             } else {
                 $allowupdatedays = abs($allowupdatedays);
-                $datestring = " + $allowupdatedays days";
+                $allowupdatedays++;
+                $datestring = "midnight + $allowupdatedays days"; // Midnight reduces the time to 00:00 of same day.
             }
             $canceluntil = strtotime($datestring, $starttime);
         } else if (

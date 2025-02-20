@@ -107,7 +107,8 @@ class booking_bookit {
     public static function render_bookit_template_data(
         booking_option_settings $settings,
         int $userid = 0,
-        bool $renderprepagemodal = true) {
+        bool $renderprepagemodal = true
+    ) {
 
         // Get blocking conditions, including prepages$prepages etc.
         $results = bo_info::get_condition_results($settings->id, $userid);
@@ -188,6 +189,7 @@ class booking_bookit {
                 $viewparam == MOD_BOOKING_VIEW_PARAM_LIST
                 || $viewparam == MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT
                 || $viewparam == MOD_BOOKING_VIEW_PARAM_LIST_IMG_RIGHT
+                || $viewparam == MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT_HALF
             ) {
                 // Only if we use one of the list views, we can use inline modals.
                 // So only in this case, we need to check the config setting.
@@ -205,7 +207,11 @@ class booking_bookit {
 
             // The extra button condition is used to show Alert & Button, if this is allowed for a user.
             if (!$justmyalert && !empty($extrabuttoncondition)) {
-                $condition = new $extrabuttoncondition();
+                if (method_exists($extrabuttoncondition, 'instance')) {
+                    $condition = $extrabuttoncondition::instance();
+                } else {
+                    $condition = new $extrabuttoncondition();
+                }
 
                 list($template, $data) = $condition->render_button($settings, $userid, $full, false, true);
 
@@ -215,7 +221,11 @@ class booking_bookit {
                 $templates[] = $template;
             }
 
-            $condition = new $buttoncondition();
+            if (method_exists($buttoncondition, 'instance')) {
+                $condition = $buttoncondition::instance();
+            } else {
+                $condition = new $buttoncondition();
+            }
 
             list($template, $data) = $condition->render_button($settings, $userid, $full, false, true);
             $data['results'] = json_encode(array_keys($results));
@@ -254,9 +264,15 @@ class booking_bookit {
         global $USER, $CFG;
 
         // Make sure the user has the right to book in principle.
-        $context = context_system::instance();
+        if ($area === 'option') {
+            $settings = singleton_service::get_instance_of_booking_option_settings($itemid);
+            $context = context_module::instance($settings->cmid);
+        } else {
+            $context = context_system::instance();
+        }
 
-        if (!empty($userid)
+        if (
+            !empty($userid)
             && $userid != $USER->id
             && !has_capability('mod/booking:overrideboconditions', $context)) {
             throw new moodle_exception('norighttoaccess', 'mod_booking');
@@ -265,14 +281,13 @@ class booking_bookit {
         }
 
         if ($area === 'option') {
-
             $settings = singleton_service::get_instance_of_booking_option_settings($itemid);
             $boinfo = new bo_info($settings);
 
             // There are two cases where we can actually book.
             // We call thefunction with hadblock set to true.
             // This means that we only get those blocks that actually should prevent booking.
-            list($id, $isavailable, $description) = $boinfo->is_available($itemid, $userid, true);
+            [$id, $isavailable, $description] = $boinfo->is_available($itemid, $userid, true);
 
             // If isavailable is true, there is actually no blocking condition at all.
             // This might never be the case, as we use this to introduce prepages and buttons (add to cart or bookit).

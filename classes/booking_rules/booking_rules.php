@@ -19,7 +19,7 @@
  *
  * @package mod_booking
  * @copyright 2022 Wunderbyte GmbH <info@wunderbyte.at>
- * @author Bernhard Fischer
+ * @author Bernhard Fischer, Magdalena Holczik
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -54,7 +54,8 @@ class booking_rules {
     public static function get_rendered_list_of_saved_rules($contextid = 1, $enableaddbutton = true) {
         global $PAGE;
 
-        $rules = self::get_list_of_saved_rules($contextid);
+        // Fetch all rules.
+        $rules = self::get_list_of_saved_rules();
         $data = new ruleslist($rules, $contextid, $enableaddbutton);
         $output = $PAGE->get_renderer('booking');
         return $output->render_ruleslist($data);
@@ -126,6 +127,27 @@ class booking_rules {
         } else {
             return array_filter($rules,
                 fn($a) => (in_array($a->contextid, $patharray) && ($a->eventname == $eventname)));
+        }
+    }
+
+    /**
+     * Deletes rules for this context and below.
+     * @param int $contextid
+     */
+    public static function delete_rules_by_context(int $contextid) {
+
+        global $DB;
+
+        // We can't delete all rules for the system context.
+        // This is an emergency brake.
+        if ($contextid == context_system::instance()->id) {
+            return;
+        }
+
+        $rulesofcontext = $DB->get_records('booking_rules', ['contextid' => $contextid]);
+
+        foreach ($rulesofcontext as $rule) {
+            rules_info::delete_rule($rule->id);
         }
     }
 }

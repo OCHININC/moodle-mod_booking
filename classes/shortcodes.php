@@ -200,6 +200,30 @@ class shortcodes {
             return get_string('definecmidforshortcode', 'mod_booking');
         }
 
+        $viewparam = MOD_BOOKING_VIEW_PARAM_LIST; // Default value.
+        if (isset($args['type'])) {
+            switch ($args['type']) {
+                // Cards are currently not yet supported in shortcode.
+                // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+                /*case 'cards':
+                    $viewparam = MOD_BOOKING_VIEW_PARAM_CARDS;
+                    break;*/
+                case 'imageleft':
+                    $viewparam = MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT;
+                    break;
+                case 'imageright':
+                    $viewparam = MOD_BOOKING_VIEW_PARAM_LIST_IMG_RIGHT;
+                    break;
+                case 'imagelefthalf':
+                    $viewparam = MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT_HALF;
+                    break;
+                case 'list':
+                default:
+                    $viewparam = MOD_BOOKING_VIEW_PARAM_LIST;
+                    break;
+            }
+        }
+
         $booking = singleton_service::get_instance_of_booking_settings_by_cmid((int)$args['cmid']);
 
         if (empty($booking->id)) {
@@ -210,8 +234,12 @@ class shortcodes {
 
         $wherearray['bookingid'] = (int)$booking->id;
 
+        // Additional where condition for both card and list views.
+        $additionalwhere = self::set_wherearray_from_arguments($args, $wherearray) ?? '';
+
         list($fields, $from, $where, $params, $filter) =
-                booking::get_options_filter_sql(0, 0, '', null, null, [], $wherearray);
+                booking::get_options_filter_sql(0, 0, '', null, null, [], $wherearray, null,
+                    [MOD_BOOKING_STATUSPARAM_BOOKED], $additionalwhere);
 
         // By default, we do not show booking options that lie in the past.
         // Shortcode arg values get transmitted as string, so also check for "false" and "0".
@@ -274,6 +302,8 @@ class shortcodes {
             $showsearch,
             $showsort,
             false,
+            true,
+            $viewparam
         );
 
         // Possibility to add customfieldfilter.
@@ -282,7 +312,19 @@ class shortcodes {
             self::apply_customfieldfilter($table, $customfieldfilter);
         }
 
-        $table->showcountlabel = false;
+        $table->showcountlabel = $showfilter ? true : false;
+
+        if (
+            isset($args['filterontop'])
+            && (
+                $args['filterontop'] == '1'
+                || $args['filterontop'] == 'true'
+            )
+        ) {
+            $table->showfilterontop = true;
+        } else {
+            $table->showfilterontop = false;
+        }
 
         // If "rightside" is in the "exclude" array, then we do not show the rightside area (containing the "Book now" button).
         if (!empty($exclude) && in_array('rightside', $exclude)) {
@@ -793,7 +835,7 @@ class shortcodes {
     /**
      * Add filter displaying the possible instances of mod booking.
      *
-     * @param mixed $table
+     * @param mixed $table reference to table
      *
      * @return void
      *
@@ -809,5 +851,63 @@ class shortcodes {
         $instancefilter = new standardfilter('bookingid', get_string('bookingidfilter', 'mod_booking'));
         $instancefilter->add_options($filterarray);
         $table->add_filter($instancefilter);
+    }
+
+    /**
+     * Modify there wherearray via arguments.
+     *
+     * @param array $args reference to args
+     * @param array $wherearray reference to wherearray
+     * @return string
+     */
+    private static function set_wherearray_from_arguments(array &$args, array &$wherearray) {
+
+        global $DB;
+
+        $customfields = booking_handler::get_customfields();
+        // Set given customfields (shortnames) as arguments.
+        $fields = [];
+        $additonalwhere = '';
+        if (!empty($customfields) && !empty($args)) {
+            foreach ($args as $key => $value) {
+                foreach ($customfields as $customfield) {
+                    if ($customfield->shortname == $key) {
+                        $configdata = json_decode($customfield->configdata ?? '[]');
+
+                        if (!empty($configdata->multiselect)) {
+                            if (!empty($additonalwhere)) {
+                                $additonalwhere .= " AND ";
+                            }
+
+                            $values = explode(',', $value);
+
+                            if (!empty($values)) {
+                                $additonalwhere .= " ( ";
+                            }
+
+                            foreach ($values as $vkey => $vvalue) {
+
+                                $additonalwhere .= $vkey > 0 ? ' OR ' : '';
+                                $vvalue = "'%$vvalue%'";
+                                $additonalwhere .= " $key LIKE $vvalue ";
+                            }
+
+                            if (!empty($values)) {
+                                $additonalwhere .= " ) ";
+                            }
+
+                        } else {
+                            $argument = strip_tags($value);
+                            $argument = trim($argument);
+                            $wherearray[$key] = $argument;
+                        }
+
+                        break;
+                    }
+                }
+            }
+        }
+
+        return $additonalwhere;
     }
 }

@@ -133,16 +133,20 @@ class calendar {
                                 $DB->update_record('booking_userevents', $userevent);
                             }
                         }
-                    } else {
-                        echo "ERROR: Calendar entry for option date could not be created.";
                     }
+                    /* TODO: Currently, dates might not be saved for teachers if the optiondates are not already saved.
+                    We need to make sure, that dates are also saved for teachers, even if we newly create an option.
+                    We might need a new MOD_BOOKING_EXECUTION_POSTSAVE_AFTER for this, so this happens AFTER the dates
+                    have been created. */
                 } else if ($settings->addtocalendar == 1) {
                     if ($optiondate = $DB->get_record("booking_optiondates", ["id" => $optiondateid])) {
                         $newcalendarid = self::booking_optiondate_add_to_cal($cmid, $optionid,
                             $optiondate, $settings->calendarid, 0, 1);
-                    } else {
-                        echo "ERROR: Calendar entry for option date could not be created.";
                     }
+                    /* TODO: Currently, dates might not be saved for teachers if the optiondates are not already saved.
+                    We need to make sure, that dates are also saved for teachers, even if we newly create an option.
+                    We might need a new MOD_BOOKING_EXECUTION_POSTSAVE_AFTER for this, so this happens AFTER the dates
+                    have been created. */
                 }
                 break;
 
@@ -166,15 +170,24 @@ class calendar {
                 break;
 
             case $this::MOD_BOOKING_TYPETEACHERREMOVE:
-                $calendarid = $DB->get_field('booking_teachers', 'calendarid',
-                    ['userid' => $userid, 'optionid' => $optionid]);
+                // We want to delete all user events for this teacher for this option.
+                $params = ['optionid' => $optionid, 'userid' => $userid];
 
-                if ($calendarid > 0) {
-                    if ($DB->record_exists("event", ['id' => $calendarid])) {
-                        $event = \calendar_event::load($calendarid);
-                        $event->delete(true);
-                    }
-                }
+                $sql1 = "DELETE FROM {event}
+                        WHERE id IN
+                        (
+                            SELECT eventid
+                            FROM {booking_userevents}
+                            WHERE optionid = :optionid
+                            AND userid = :userid
+                        )
+                ";
+                $DB->execute($sql1, $params);
+
+                $sql2 = "DELETE FROM {booking_userevents}
+                        WHERE optionid = :optionid
+                        AND userid = :userid";
+                $DB->execute($sql2, $params);
                 break;
         }
     }

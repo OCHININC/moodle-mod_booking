@@ -1,3 +1,172 @@
+## Version 8.9.16 (2025011702)
+* Bugfix: Only add setting optionviewcustomfields if custom fields exist.
+
+## Version 8.9.15 (2025011700)
+* Hotfix: Make sure missing rules_info in lib.php does not break the upgrade. (#805)
+
+## Version 8.9.14 (2025011601)
+* Improvement: Changed dependency of Wunderbyte Table to newer version fixing wbt_field_controllers.
+
+## Version 8.9.13 (2025011600)
+* New feature: Add possibility to display the values of any booking option customfields on detail page. (#774)
+* Improvement: Add action delete button to new report2.
+* Improvement: Fix string for duplicate booking option.
+* Improvement: Remove underscores from links and use better divider in report2 nav.
+* Improvement: Add back and edit button to details view (#773).
+* Improvement: Fix margin for showheaderimagelefthalf.
+* Improvement: Add class to identify card for imagelefthalf.
+* Improvement: Better string for selflearningcoursedurationinfo.
+* Improvement: Always generically use wbt field controllers to render customfields on detail page (#774).
+* Improvement: Add multiselect for customfields to show on detail page. (#774)
+* Improvement: Make sure empty price categories are deleted from singleton.
+* Bugfix: Fix behat for new waiting list accordion (extra click necessary).
+* Bugfix: Fix string for user calendar URL.
+* Bugfix: Presence status still needs to work without PRO license!
+* Bugfix: Fix merging errors.
+* Bugfix: Fix "file is stale" problems.
+* Bugfix: Fix string order issues (#648).
+* Bugfix: Add icon class to fix behat.
+* Bugfix: Add title and aria-label for settings dropdown to fix behat tests.
+* Bugfix: Use fontawesome icon fa-cog instead of t/edit to fix Moodle 4.4 icon.
+* Bugfix: Remove webkit-specific CSS to fix Safari layout.
+* Bugfix: Dates placeholder returns dates (#756).
+* Bugfix: Remove `<br>` tag for date display col starttime.
+* Bugfix: Make sure to use cmid of type int (#572).
+* Bugfix: Correctly handle empty price category (#778).
+* Bugfix: Coding error completion `custom_completion` (#779).
+* Test: New phpunit test `test_booking_cancellation_wiht_multiple_dates_and_consumption_enabled` (#777).
+* Test: New phpunit test `test_booking_cancellation_wiht_consumption_enabled` (#777).
+* Test: New phpunit test `test_booking_cancellation_wiht_fixed_consumption` (#777).
+* Test: New phpunit test `test_booking_bookit_capabilitynotneeded` to cover `JSON_ALLOWEDTOBOOKININSTANCE` and `MOD_BOOKING_CONDPARAM_CANBEOVERRI`.
+* Test: Adjust 6 phpunit tests.
+* Test: Refactor and extend `test_booking_customform()` phpunit to support multiple form elements and validate response (#524).
+* Test: Refactor 1 data provider and 1 phpunit test.
+* Test: New behat scenario: Booking - cancellation of all users' purchases when price and consumption were set (#777).
+* Test: New behat scenario: Configure availability with modal form and multiple elements (#524).
+* Test: New behat scenario: Booking - cancellation of all user purchases by teacher when price was set (#777).
+
+## Version 8.9.12 (2025011500)
+* Improvement: Display teacherimage on bookingoption detailview #792
+* Improvement: GH-784 go to course button
+* Bugfix: Don't show currency labels on empty price
+* Bugfix: Show price correctly
+* Bugfix context check for rules deletion
+* Bugfix: Avoid error on empty price element
+* Bugfix: removed duplicate string
+* Bugfix: default value get_options_filter_sql
+* Bugfix: Display teacherimage only for teachers with image
+* Bugfix: Track changes for dates and location correctly #796
+* Bugfix: Allow cancellation on zero price booking options
+
+## Version 8.9.11.1 (2025011001)
+* Bugfix: Make sure no notification,completion,confirmation mails are sent anymore.
+* Bugfix: Don't compare on dates to notify anymore
+* Bugfix: Fix limit send notification for updated booking options
+
+## Version 8.9.11 (2025011100)
+* Improvement: Change datesandentties placeholder to deal with selflearningcourses.
+* Improvement: Better datesandentities placeholder (especially with duration 0).
+* Bugfix: Move setting for bookingmanager in global area of bo instance settings.
+
+## Version 8.9.10 (2025010802)
+Bugfix: replace empty placeholders correctly if tags are given
+Bugfix: Use actual blank instead of nbsp as it might not be rendered in plaintext e-mail. #787
+
+## Version 8.9.9 (2025010801)
+Bugfix: don't format text for all event descriptions in event log table
+
+## Version 8.9.8 (2025010800)
+* Improvement: Case insensitive fetching of template courses
+* Bugfix: Replace wrong usage of array_pop which destroyed our singleton. #777
+* Bugfix: Fix regex for optiondate customfields so it doesn't match incorrectly. (#781)
+* Bugfix: Deletion of other than shortterm reservations were not working anymore via booked_users class (#759)
+
+## Version 8.9.3 (2025010300)
+* Bugfix: Avoid unintentional deletion of all system rules (Important!)
+* Bugfix: Add missing cachedef strings
+
+## Version 8.9.2 (2024122000)
+* New feature: Add shortcode arg to show the courselist filter on top (#752).
+* Improvement: Rules can be set active/inactive #764
+* Improvement: Convert bookingdetailslink overwritable string #767
+* Improvement: Display links to other rules in system rules site #656
+* Improvement: Better description for enrol in group function #635
+* Improvement: Set rule property active default as true.
+* Improvement: Add possibility to pre-filter shortcode for any customfield (#752).
+* Improvement: add setting to hide duration for selflearning courses
+* Improvement: Also hide duration on optionview.php if setting to hide duration for selflearningcourses is active.
+* Bugfix: Correct strings #742
+* Bugfix: Placeholder coursecalendar generates correct link #754
+* Bugfix: Correctly check if rule is active #764
+* Bugfix: Disable sorting of indexnumber in report.php #741
+* Bugfix: Bugfix for "Unknown error type: Creation of dynamic property mod_booking\booking_rules\rules\rule_react_on_event::$ruleisactive is deprecated".
+* Bugfix: Check capability on correct context (Wunderbyte-GmbH/Wunderbyte-GmbH#291)
+* Bugfix: Test modcontext, not systemcontext for invisible options
+* Bugfix: Use correct context and test on $settings-id, not optionid
+* Test: Fix fieldname and message strings in behat.
+
+## Version 8.9.1 (2024121800)
+* Improvement: Add helper function to get a list of all cmids (of all booking instances).
+* Improvement: GH-771 Show countlabel whenever filters are activated (to have the reset button).
+* Improvement: Add "h" string also to htmlstring.
+* Improvement: Truncate teacher description on overview page, add modal to view long description directly.
+* Improvement: Add debug messages, so we can investigate broken download (Wunderbyte-GmbH/Wunderbyte-GmbH#283).
+* Improvement: Improve settings for Moodle Mobile App.
+* Improvement: Try catch for campaign application to make sure nothing breaks if campaign contains errors.
+* Improvement: Codestyle remove duplicated function.
+* Bugfix: GH-765 Make sure we don't encounter error with legacy booking answers.
+* Bugfix: Display "hour" only once.
+* Bugfix: Correctly create and delete user events (for each session) for teachers of booking options.
+* Bugfix: Error when creating booking option templates with teachers, dates and addtocalendar active (fixes #766).
+* Bugfix: strip_tags needs string value, null not allowed.
+* Bugfix: Check for singleton of (extrabutton-)condition.
+* Bugfix: Add link to booking rules for string deleteinfoscheckboxadminwarning.
+* Bugfix: Correctly handle cancel of reservation in report.php (#759).
+* Bugfix: Make sure rules of instance are deleted with booking instance (#764).
+* Test: New phpunit test method test_backup_restore_bookings_with_options_quiz_into_other_course() (#518).
+* Test: Extend phpunit test method test_backup_restore_bookings_with_options_quiz_into_other_course() to use custom fields too (#518).
+* Test: Update phpunit test method test_backup_restore_bookings_with_options_quiz_into_other_course() to use few date sessions (#518).
+* Test: Improve cache clean-up.
+* Test: New phpunit test_rule_on_freeplace_on_intervals() (#467).
+
+## Version 8.9.0 (2024121200)
+* Improvement: Possibility to turn off prices for not logged in users #762.
+* Improvement: Empty tabs (#709).
+* Bugfix: Make campaigns backwards compatible (Wunderbyte-GmbH/Wunderbyte-GmbH#279).
+* Bugfix: Correctly check overlapping for combination of two dates and one date (#757).
+* Test: Fix custom behat step to use proper identificators.
+* Test: New behat Scenario: Booking option: waiting list with prices (#457).
+
+## Version 8.8.9 (2024121000)
+* Improvement: Extend tests for campaign
+* Bugfix: Pricedisplay with unknown identifier
+
+## Version 8.8.8 (2024120900)
+* Improvement: Add another option in booking settings to allow cancel without limit.
+* Bugfix: Fix mlang first in event log table and in message body.
+* Bugfix: Campaign feature.
+
+## Version 8.8.7 (2024120501)
+* New Feature: Add condition to block/warn overlapping of bookingoption dates.
+
+## Version 8.8.6 (2024120500)
+* Bugfix: format string in customfields only for string
+
+## Version 8.8.5 (2024120400)
+* Improvement: Nav tabs for mobile view
+* Bugfix: Prevent booking rules from being sent on inactive configuration
+* Bugfix: No price if fallback for default price is off
+* Bugfix: Notification list only for logged in users & display price
+* Bugfix: Several fixes for self-learning courses
+
+## Version 8.8.4 (2024120300)
+* Improvement: Add type=imageleft (or imageright) to shortcode 'courselist' to show header images.
+* Improvement: Campaigns allow multiple profile fields
+* Improvement: Set relative cancellation dates until midnight of selected day
+* Improvement: Format string on changes values from customfields
+* Bugfix: Apply campaigns correctly for users not logged in.
+* Bugfix: check userprofilefield doesn't break view for users not logged in
+
 ## Version 8.8.3 (2024112800)
 * New feature: List views with header image on left or right side. (#233)
 * Improvement: Pass template data via Wunderbyte table. (#233)

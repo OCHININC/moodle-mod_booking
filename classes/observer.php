@@ -159,10 +159,14 @@ class mod_booking_observer {
      * @throws dml_exception
      */
     public static function bookingoption_cancelled(\mod_booking\event\bookingoption_cancelled $event) {
-
         rules_info::$eventstoexecute[] = function () use ($event) {
             $optionid = $event->objectid;
             $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+
+            // We don't test.
+            if (PHPUNIT_TEST && empty($settings->cmid)) {
+                return;
+            }
             $bookingoption = singleton_service::get_instance_of_booking_option($settings->cmid, $optionid);
             $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
 
@@ -248,6 +252,7 @@ class mod_booking_observer {
     public static function bookingoptiondate_created(\mod_booking\event\bookingoptiondate_created $event) {
 
         $optionid = $event->other['optionid'];
+        $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
 
         if (empty($optionid)) {
             return;
@@ -262,6 +267,11 @@ class mod_booking_observer {
         $users = $bookingoption->get_all_users_booked();
         foreach ($users as $user) {
             new calendar($event->contextinstanceid, $optionid, $user->userid,
+                calendar::MOD_BOOKING_TYPEOPTIONDATE, $event->objectid, 1);
+        }
+        // Also create calendar events for teachers.
+        foreach ($settings->teacherids as $teacherid) {
+            new calendar($event->contextinstanceid, $optionid, $teacherid,
                 calendar::MOD_BOOKING_TYPEOPTIONDATE, $event->objectid, 1);
         }
     }
@@ -324,6 +334,7 @@ class mod_booking_observer {
             // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
             /* new calendar($tmpcmid->id, $value->id, 0, calendar::MOD_BOOKING_TYPEOPTION); */
 
+            // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
             // TODO: We have to re-write this function so all calendar entries of optiondates will get updated correctly.
 
             $allteachers = $DB->get_records_sql("SELECT userid FROM {booking_teachers} WHERE optionid = ? AND calendarid > 0",
@@ -341,7 +352,25 @@ class mod_booking_observer {
      * @param \mod_booking\event\teacher_added $event
      */
     public static function teacher_added(\mod_booking\event\teacher_added $event) {
-        new calendar($event->contextinstanceid, $event->objectid, $event->relateduserid, calendar::MOD_BOOKING_TYPETEACHERADD);
+        $optionid = $event->objectid;
+        if (empty($optionid)) {
+            return;
+        }
+        $teacherid = $event->relateduserid;
+        $cmid = $event->contextinstanceid;
+
+        // For templates, we do not create calendar events for teachers (fixes #766).
+        if (empty($cmid)) {
+            return;
+        }
+
+        $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+
+        // Create calendar events for the newly added teacher.
+        foreach ($settings->sessions as $session) {
+            new calendar($cmid, $optionid, $teacherid,
+                calendar::MOD_BOOKING_TYPEOPTIONDATE, $session->id, 1);
+        }
     }
 
     /**

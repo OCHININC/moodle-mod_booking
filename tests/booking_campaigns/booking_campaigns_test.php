@@ -83,10 +83,18 @@ final class booking_campaigns_test extends advanced_testcase {
         // Setup test data.
         $course = $this->getDataGenerator()->create_course(['enablecompletion' => 1]);
 
+        $this->getDataGenerator()->create_custom_profile_field([
+            'datatype' => 'text',
+            'shortname' => 'ugroup1',
+            'name' => 'ugroup1',
+            'visible' => "2",
+        ]);
         // Create users.
-        $student1 = $this->getDataGenerator()->create_user();
-        $student2 = $this->getDataGenerator()->create_user();
+        $student1 = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'student']);
+        $student2 = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'student']);
         $student3 = $this->getDataGenerator()->create_user();
+        $employee = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'employee']);
+        $multipleugroups = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'employee,somethingelse']);
         $teacher = $this->getDataGenerator()->create_user();
         $bookingmanager = $this->getDataGenerator()->create_user(); // Booking manager.
 
@@ -100,36 +108,38 @@ final class booking_campaigns_test extends advanced_testcase {
         $this->getDataGenerator()->enrol_user($student1->id, $course->id, 'student');
         $this->getDataGenerator()->enrol_user($student2->id, $course->id, 'student');
         $this->getDataGenerator()->enrol_user($student3->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($employee->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($multipleugroups->id, $course->id, 'student');
         $this->getDataGenerator()->enrol_user($teacher->id, $course->id, 'editingteacher');
         $this->getDataGenerator()->enrol_user($bookingmanager->id, $course->id, 'editingteacher');
 
-        $categorydata            = new stdClass();
-        $categorydata->name      = 'BookCustomCat1';
+        $categorydata = new stdClass();
+        $categorydata->name = 'BookCustomCat1';
         $categorydata->component = 'mod_booking';
-        $categorydata->area      = 'booking';
-        $categorydata->itemid    = 0;
+        $categorydata->area = 'booking';
+        $categorydata->itemid = 0;
         $categorydata->contextid = context_system::instance()->id;
 
-        $bookingcat = $this->getDataGenerator()->create_custom_field_category((array)$categorydata);
+        $bookingcat = $this->getDataGenerator()->create_custom_field_category((array) $categorydata);
         $bookingcat->save();
 
-        $fielddata                = new stdClass();
-        $fielddata->categoryid    = $bookingcat->get('id');
-        $fielddata->name       = 'Sport1';
-        $fielddata->shortname  = 'spt1';
+        $fielddata = new stdClass();
+        $fielddata->categoryid = $bookingcat->get('id');
+        $fielddata->name = 'Sport1';
+        $fielddata->shortname = 'spt1';
         $fielddata->type = 'text';
-        $fielddata->configdata    = "{\"required\":\"0\",\"uniquevalues\":\"0\",\"locked\":\"0\",\"visibility\":\"2\",
+        $fielddata->configdata = "{\"required\":\"0\",\"uniquevalues\":\"0\",\"locked\":\"0\",\"visibility\":\"2\",
                                     \"defaultvalue\":\"\",\"displaysize\":30,\"maxlength\":50,\"ispassword\":\"0\",
                                     \"link\":\"\",\"linktarget\":\"\"}";
-        $bookingfield = $this->getDataGenerator()->create_custom_field((array)$fielddata);
+        $bookingfield = $this->getDataGenerator()->create_custom_field((array) $fielddata);
         $bookingfield->save();
         $this->assertTrue(\core_customfield\field::record_exists($bookingfield->get('id')));
 
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
 
-        // Create 1st blocking campaing: with "abowe" condition.
-        $campaingdata1 = (object)[
+        // Create 1st blocking campaing: with "above" condition.
+        $campaingdata1 = (object) [
             'bofieldname' => 'spt1',
             'fieldvalue' => 'tennis',
             'campaignfieldnameoperator' => '=',
@@ -142,15 +152,18 @@ final class booking_campaigns_test extends advanced_testcase {
             'percentageavailableplaces' => 30,
         ];
         $campaing1 = [
-            'name' => 'bloking_above30', 'type' => 1,
-            'starttime' => strtotime('yesterday'), 'endtime' => strtotime('now + 1 month'),
-            'pricefactor' => 1, 'limitfactor' => 1,
+            'name' => 'bloking_above30',
+            'type' => 1,
+            'starttime' => strtotime('yesterday'),
+            'endtime' => strtotime('now + 1 month'),
+            'pricefactor' => 1,
+            'limitfactor' => 1,
             'json' => json_encode($campaingdata1),
         ];
         $plugingenerator->create_campaign($campaing1);
 
         // Create 2nd blocking campaing: with "below" condition.
-        $campaingdata2 = (object)[
+        $campaingdata2 = (object) [
             'bofieldname' => 'spt1',
             'fieldvalue' => 'yoga',
             'campaignfieldnameoperator' => '=',
@@ -163,12 +176,40 @@ final class booking_campaigns_test extends advanced_testcase {
             'percentageavailableplaces' => 30,
         ];
         $campaing2 = [
-            'name' => 'bloking_below30', 'type' => 1,
-            'starttime' => strtotime('yesterday'), 'endtime' => strtotime('now + 1 month'),
-            'pricefactor' => 1, 'limitfactor' => 1,
+            'name' => 'bloking_below30',
+            'type' => 1,
+            'starttime' => strtotime('yesterday'),
+            'endtime' => strtotime('now + 1 month'),
+            'pricefactor' => 1,
+            'limitfactor' => 1,
             'json' => json_encode($campaingdata2),
         ];
         $plugingenerator->create_campaign($campaing2);
+
+        // Create 3rd blocking campaing: with multiple custom user profile fields and without bofield.
+        $campaingdata3 = (object) [
+            'bofieldname' => '0',
+            'campaignfieldnameoperator' => null,
+            'fieldvalue' => '',
+            'cpfield' => 'ugroup1',
+            'cpoperator' => '!~',
+            'cpvalue' => ["student", "employee"],
+            'blockoperator' => 'blockalways',
+            'blockinglabel' => 'multiple user fields',
+            'hascapability' => "",
+            'percentageavailableplaces' => 50,
+        ];
+        $campaing3 = [
+            'name' => 'multiple_user_fields',
+            'type' => 1,
+            'starttime' => strtotime('yesterday'),
+            'endtime' => strtotime('now + 1 month'),
+            'pricefactor' => 1,
+            'limitfactor' => 1,
+            'json' => json_encode($campaingdata3),
+        ];
+
+        $plugingenerator->create_campaign($campaing3);
 
         // Create 1st booking option.
         $record = new stdClass();
@@ -198,39 +239,102 @@ final class booking_campaigns_test extends advanced_testcase {
         $optionobj2 = singleton_service::get_instance_of_booking_option($settings2->cmid, $option2->id);
         $boinfo2 = new bo_info($settings2);
 
+        // Create 3rd booking option.
+        $record->text = 'Test option3';
+        $record->customfield_spt1 = '';
+        $record->maxanswers = 6;
+        $option3 = $plugingenerator->create_option($record);
+        singleton_service::destroy_booking_option_singleton($option3->id); // Mandatory there.
+        $settings3 = singleton_service::get_instance_of_booking_option_settings($option3->id);
+        $optionobj3 = singleton_service::get_instance_of_booking_option($settings3->cmid, $option3->id);
+        $boinfo3 = new bo_info($settings3);
+
         // Try to book options with student1.
         $this->setUser($student1);
         singleton_service::destroy_user($student1->id);
         // Book option1.
         $result = booking_bookit::bookit('option', $settings1->id, $student1->id);
         $result = booking_bookit::bookit('option', $settings1->id, $student1->id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings1->id, $student1->id, true);
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
         // Try to book option2 but cannot: "block_below_30".
-        list($id, $isavailable, $description) = $boinfo2->is_available($settings2->id, $student1->id, true);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Book option3.
+        $result = booking_bookit::bookit('option', $settings3->id, $student1->id);
+        $result = booking_bookit::bookit('option', $settings3->id, $student1->id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student1->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Try to book options with student2.
         $this->setUser($student2);
         singleton_service::destroy_user($student2->id);
         // Try to book option1 but cannot: "block_above_30".
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings1->id, $student2->id, true);
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
         // Try to book option2 but cannot: "block_below_30".
-        list($id, $isavailable, $description) = $boinfo2->is_available($settings2->id, $student2->id, true);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Book option3.
+        $result = booking_bookit::bookit('option', $settings3->id, $student2->id);
+        $result = booking_bookit::bookit('option', $settings3->id, $student2->id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student2->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
+
+        // Try to book options with student3.
+        $this->setUser($student3);
+        singleton_service::destroy_user($student3->id);
+        // Try to book option1 but cannot: "block_above_30".
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Try to book option2 but cannot: "block_below_30".
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Try to book option3 but cannot: profile_field_ugroup1 is empty (<> student).
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+
+        // Try to book options with employee.
+        $this->setUser($employee);
+        singleton_service::destroy_user($employee->id);
+        // Try to book option1 but cannot: "block_above_30".
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Try to book option2 but cannot: "block_below_30".
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Book option3: profile_field_ugroup1 == employee.
+        $result = booking_bookit::bookit('option', $settings3->id, $employee->id);
+        $result = booking_bookit::bookit('option', $settings3->id, $employee->id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
+
+        // Try to book options with multipleugroups.
+        $this->setUser($multipleugroups);
+        singleton_service::destroy_user($multipleugroups->id);
+        // Try to book option1 but cannot: "block_above_30".
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $multipleugroups->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Try to book option2 but cannot: "block_below_30".
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $multipleugroups->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Book option3: profile_field_ugroup1 contains employee.
+        $result = booking_bookit::bookit('option', $settings3->id, $multipleugroups->id);
+        $result = booking_bookit::bookit('option', $settings3->id, $multipleugroups->id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $multipleugroups->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Admin's adjustments for options / campaigns.
         $this->setAdminUser();
         // Book the student1 directly into option2 to make it accessible for other users.
         $optionobj2->user_submit_response($student1, 0, 0, 0, MOD_BOOKING_VERIFIED);
-        list($id, $isavailable, $description) = $boinfo2->is_available($settings2->id, $student1->id, true);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Validate that option2 become accessible for student2.
         $this->setUser($student2);
         singleton_service::destroy_user($student2->id);
-        list($id, $isavailable, $description) = $boinfo2->is_available($settings2->id, $student2->id, true);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
 
         $this->setAdminUser();
@@ -268,26 +372,75 @@ final class booking_campaigns_test extends advanced_testcase {
         $settings2 = singleton_service::get_instance_of_booking_option_settings($option2->id);
         $optionobj2 = singleton_service::get_instance_of_booking_option($settings2->cmid, $option2->id);
         $boinfo2 = new bo_info($settings2);
+        singleton_service::destroy_booking_option_singleton($option3->id); // Mandatory there.
+        $settings3 = singleton_service::get_instance_of_booking_option_settings($option3->id);
+        $optionobj3 = singleton_service::get_instance_of_booking_option($settings3->cmid, $option3->id);
+        $boinfo3 = new bo_info($settings3);
 
         // Try to book options with student1.
         $this->setUser($student1);
         singleton_service::destroy_user($student1->id);
         // Validate option1 already booked.
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings1->id, $student1->id, true);
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
         // Try to book option2.
-        list($id, $isavailable, $description) = $boinfo2->is_available($settings2->id, $student1->id, true);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student1->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
+        // Validate option3 already booked.
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Try to book options with student2.
         $this->setUser($student2);
         singleton_service::destroy_user($student2->id);
         // Validate that option1 become accessible for student2 - campaign has not started yet.
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings1->id, $student2->id, true);
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
         // Validate that option2 became inaccessible for student2 again.
-        list($id, $isavailable, $description) = $boinfo2->is_available($settings2->id, $student2->id, true);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Validate option3 already booked.
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student2->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
+
+        // Try to book options with student3.
+        $this->setUser($student3);
+        singleton_service::destroy_user($student3->id);
+        // Try to book option1 but cannot: "block_above_30".
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Try to book option2 but cannot: "block_below_30".
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Try to book option3 but cannot: profile_field_ugroup1 is empty (<> student).
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+
+        // Try to book options with employee.
+        $this->setUser($employee);
+        singleton_service::destroy_user($employee->id);
+        // Validate that option1 become accessible for employee - campaign has not started yet.
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+        // Try to book option2 but cannot: "block_below_30".
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Validate option3 already booked.
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
+
+        // Try to book options with multipleugroups.
+        $this->setUser($multipleugroups);
+        singleton_service::destroy_user($multipleugroups->id);
+        // Validate that option1 become accessible for multipleugroups - campaign has not started yet.
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $multipleugroups->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+        // Try to book option2 but cannot: "block_below_30".
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $multipleugroups->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Validate option3 already booked.
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $multipleugroups->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
     }
 
     /**
@@ -305,10 +458,14 @@ final class booking_campaigns_test extends advanced_testcase {
 
         // Create user profile custom fields.
         $this->getDataGenerator()->create_custom_profile_field([
-            'datatype' => 'text', 'shortname' => 'ucustom1', 'name' => 'ucustom1',
+            'datatype' => 'text',
+            'shortname' => 'ucustom1',
+            'name' => 'ucustom1',
         ]);
         $this->getDataGenerator()->create_custom_profile_field([
-            'datatype' => 'text', 'shortname' => 'ucustom2', 'name' => 'ucustom2',
+            'datatype' => 'text',
+            'shortname' => 'ucustom2',
+            'name' => 'ucustom2',
         ]);
 
         $users = [
@@ -330,6 +487,9 @@ final class booking_campaigns_test extends advanced_testcase {
         $student6 = $this->getDataGenerator()->create_user();
         $student7 = $this->getDataGenerator()->create_user();
         $student8 = $this->getDataGenerator()->create_user();
+        $student9 = $this->getDataGenerator()->create_user(['profile_field_ucustom1' => 'other1,other2']);
+        $employee = $this->getDataGenerator()->create_user(['profile_field_ucustom1' => 'employee']);
+        $multipleugroups = $this->getDataGenerator()->create_user(['profile_field_ucustom1' => 'employee,somethingelse']);
         $teacher = $this->getDataGenerator()->create_user();
         $bookingmanager = $this->getDataGenerator()->create_user(); // Booking manager.
 
@@ -343,29 +503,37 @@ final class booking_campaigns_test extends advanced_testcase {
         $this->getDataGenerator()->enrol_user($student1->id, $course1->id, 'student');
         $this->getDataGenerator()->enrol_user($student2->id, $course1->id, 'student');
         $this->getDataGenerator()->enrol_user($student3->id, $course1->id, 'student');
+        $this->getDataGenerator()->enrol_user($student4->id, $course1->id, 'student');
+        $this->getDataGenerator()->enrol_user($student5->id, $course1->id, 'student');
+        $this->getDataGenerator()->enrol_user($student6->id, $course1->id, 'student');
+        $this->getDataGenerator()->enrol_user($student7->id, $course1->id, 'student');
+        $this->getDataGenerator()->enrol_user($student8->id, $course1->id, 'student');
+        $this->getDataGenerator()->enrol_user($student9->id, $course1->id, 'student');
+        $this->getDataGenerator()->enrol_user($employee->id, $course1->id, 'student');
+        $this->getDataGenerator()->enrol_user($multipleugroups->id, $course1->id, 'student');
         $this->getDataGenerator()->enrol_user($teacher->id, $course1->id, 'editingteacher');
         $this->getDataGenerator()->enrol_user($bookingmanager->id, $course1->id, 'editingteacher');
 
         // Create booking custom field.
-        $categorydata            = new stdClass();
-        $categorydata->name      = 'BookCustomCat1';
+        $categorydata = new stdClass();
+        $categorydata->name = 'BookCustomCat1';
         $categorydata->component = 'mod_booking';
-        $categorydata->area      = 'booking';
-        $categorydata->itemid    = 0;
+        $categorydata->area = 'booking';
+        $categorydata->itemid = 0;
         $categorydata->contextid = context_system::instance()->id;
 
-        $bookingcat = $this->getDataGenerator()->create_custom_field_category((array)$categorydata);
+        $bookingcat = $this->getDataGenerator()->create_custom_field_category((array) $categorydata);
         $bookingcat->save();
 
-        $fielddata                = new stdClass();
-        $fielddata->categoryid    = $bookingcat->get('id');
-        $fielddata->name       = 'bcustom1';
-        $fielddata->shortname  = 'bcustom1';
+        $fielddata = new stdClass();
+        $fielddata->categoryid = $bookingcat->get('id');
+        $fielddata->name = 'bcustom1';
+        $fielddata->shortname = 'bcustom1';
         $fielddata->type = 'text';
-        $fielddata->configdata    = "{\"required\":\"0\",\"uniquevalues\":\"0\",\"locked\":\"0\",\"visibility\":\"2\",
+        $fielddata->configdata = "{\"required\":\"0\",\"uniquevalues\":\"0\",\"locked\":\"0\",\"visibility\":\"2\",
                                     \"defaultvalue\":\"\",\"displaysize\":30,\"maxlength\":50,\"ispassword\":\"0\",
                                     \"link\":\"\",\"linktarget\":\"\"}";
-        $bookingfield = $this->getDataGenerator()->create_custom_field((array)$fielddata);
+        $bookingfield = $this->getDataGenerator()->create_custom_field((array) $fielddata);
         $bookingfield->save();
         $this->assertTrue(\core_customfield\field::record_exists($bookingfield->get('id')));
 
@@ -390,7 +558,7 @@ final class booking_campaigns_test extends advanced_testcase {
 
         $record = new stdClass();
         $record->bookingid = $booking1->id;
-        $record->text = 'Test option1';
+        $record->text = 'Test option';
         $record->chooseorcreatecourse = 1;
         $record->courseid = $course2->id;
         $record->useprice = 0;
@@ -406,7 +574,7 @@ final class booking_campaigns_test extends advanced_testcase {
 
         $record = new stdClass();
         $record->bookingid = $booking1->id;
-        $record->text = 'Test option1';
+        $record->text = 'Test option3';
         $record->chooseorcreatecourse = 1;
         $record->courseid = $course2->id;
         $record->useprice = 0;
@@ -421,34 +589,61 @@ final class booking_campaigns_test extends advanced_testcase {
         singleton_service::destroy_booking_option_singleton($option3->id); // Mandatory there.
 
         // Create blocking campaing.
-        $campaingdata = (object)[
+        $campaingdata1 = (object) [
             'bofieldname' => 'bcustom1',
             'fieldvalue' => 'exclude',
-            'campaignfieldnameoperator' => '!~', // Does not contain!
+            'campaignfieldnameoperator' => '!~', // Does not contains!
             'cpfield' => 'ucustom1',
-            'cpoperator' => '~',
-            'cpvalue' => 'student',
+            'cpoperator' => '~', // Contains!
+            'cpvalue' => ['student'],
             'blockoperator' => 'blockbelow',
             'blockinglabel' => 'Below_50',
             'hascapability' => null,
             'percentageavailableplaces' => 50,
         ];
-        $campaing = new stdClass();
-        $campaing = [
-            'name' => 'bloking1', 'type' => 1,
-            'starttime' => strtotime('yesterday'), 'endtime' => strtotime('now + 1 week'),
-            'pricefactor' => 1, 'limitfactor' => 1,
-            'json' => json_encode($campaingdata),
+        $campaing1 = new stdClass();
+        $campaing1 = [
+            'name' => 'bloking1',
+            'type' => 1,
+            'starttime' => strtotime('yesterday'),
+            'endtime' => strtotime('now + 1 week'),
+            'pricefactor' => 1,
+            'limitfactor' => 1,
+            'json' => json_encode($campaingdata1),
         ];
+        $plugingenerator->create_campaign($campaing1);
 
-        $plugingenerator->create_campaign($campaing);
+        // Create 2nd blocking campaing: with multiple custom user profile fields and without bofield.
+        $campaingdata2 = (object) [
+            'bofieldname' => '0',
+            'campaignfieldnameoperator' => null,
+            'fieldvalue' => '',
+            'cpfield' => 'ucustom1',
+            'cpoperator' => '!~', // Does not contains!
+            'cpvalue' => ["student", "employee", "teacher"],
+            'blockoperator' => 'blockalways',
+            'blockinglabel' => 'multiple user fields',
+            'hascapability' => "",
+            'percentageavailableplaces' => 50,
+        ];
+        $campaing2 = [
+            'name' => 'multiple_user_fields',
+            'type' => 1,
+            'starttime' => strtotime('yesterday'),
+            'endtime' => strtotime('now + 1 month'),
+            'pricefactor' => 1,
+            'limitfactor' => 1,
+            'json' => json_encode($campaingdata2),
+        ];
+        $plugingenerator->create_campaign($campaing2);
 
         $settings1 = singleton_service::get_instance_of_booking_option_settings($option1->id);
         $optionobj1 = singleton_service::get_instance_of_booking_option($settings1->cmid, $option1->id);
         // To avoid retrieving the singleton with the wrong settings, we destroy it.
         singleton_service::destroy_booking_singleton_by_cmid($settings1->cmid);
         $boinfo1 = new bo_info($settings1);
-        // Option1 - booke necessary users directly.
+
+        // Option1 - book necessary users directly.
         $optionobj1->user_submit_response($student4, 0, 0, 0, MOD_BOOKING_VERIFIED);
         $optionobj1->user_submit_response($student5, 0, 0, 0, MOD_BOOKING_VERIFIED);
         $optionobj1->user_submit_response($student6, 0, 0, 0, MOD_BOOKING_VERIFIED);
@@ -466,37 +661,402 @@ final class booking_campaigns_test extends advanced_testcase {
         // To avoid retrieving the singleton with the wrong settings, we destroy it.
         singleton_service::destroy_booking_singleton_by_cmid($settings3->cmid);
 
-        // Option3 - booke necessary users directly.
+        // Option3 - book necessary users directly.
         $optionobj3->user_submit_response($student4, 0, 0, 0, MOD_BOOKING_VERIFIED);
         $optionobj3->user_submit_response($student5, 0, 0, 0, MOD_BOOKING_VERIFIED);
         $boinfo3 = new bo_info($settings3);
 
         $this->setUser($student1);
         singleton_service::destroy_user($student1->id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings1->id, $student1->id, true);
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings2->id, $student1->id, true);
+        // Blocked by campaign1.
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings3->id, $student1->id, true);
+        // Blocked by campaign1.
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
 
         $this->setUser($student2);
         singleton_service::destroy_user($student2->id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings1->id, $student2->id, true);
-        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings2->id, $student2->id, true);
-        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings3->id, $student2->id, true);
-        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+        // All blocked by campaign2.
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student2->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student2->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student2->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
 
         $this->setUser($student3);
         singleton_service::destroy_user($student3->id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings1->id, $student3->id, true);
+        // All accessible.
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student3->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings2->id, $student3->id, true);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student3->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
-        list($id, $isavailable, $description) = $boinfo1->is_available($settings3->id, $student3->id, true);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student3->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+
+        $this->setUser($student9);
+        singleton_service::destroy_user($student9->id);
+        // All blocked by campaign2.
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student9->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student9->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student9->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+
+        // Try to book options with employee.
+        $this->setUser($employee);
+        singleton_service::destroy_user($employee->id);
+        // All accessible.
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+
+        // Try to book options with multipleugroups.
+        $this->setUser($multipleugroups);
+        singleton_service::destroy_user($multipleugroups->id);
+        // All accessible.
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $multipleugroups->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $multipleugroups->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $multipleugroups->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+    }
+
+    /**
+     * Test campaign blockbooking.
+     *
+     * @covers \condition\campaign_blockbooking::is_available
+     * @param array $bdata
+     * @throws \coding_exception
+     * @throws \dml_exception
+     *
+     * @dataProvider booking_campaigns_settings_provider
+     */
+    public function test_booking_bookit_campaign_blockbooking_extended_cases(array $bdata): void {
+        global $DB, $CFG;
+
+        self::tearDown();
+
+        // Setup test data.
+        $course = $this->getDataGenerator()->create_course(['enablecompletion' => 1]);
+
+        $this->getDataGenerator()->create_custom_profile_field([
+            'datatype' => 'text',
+            'shortname' => 'ugroup1',
+            'name' => 'ugroup1',
+            'visible' => "2",
+        ]);
+        // Create users.
+        $student1 = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'student,employee']);
+        $student2 = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'student']);
+        $student3 = $this->getDataGenerator()->create_user();
+        $employee = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'employee']);
+        $multipleugroups = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'employee,somethingelse']);
+        $teacher = $this->getDataGenerator()->create_user();
+        $bookingmanager = $this->getDataGenerator()->create_user(); // Booking manager.
+
+        $bdata['course'] = $course->id;
+        $bdata['bookingmanager'] = $bookingmanager->username;
+
+        $booking1 = $this->getDataGenerator()->create_module('booking', $bdata);
+
+        $this->setAdminUser();
+
+        $this->getDataGenerator()->enrol_user($student1->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($student2->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($student3->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($employee->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($multipleugroups->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($teacher->id, $course->id, 'editingteacher');
+        $this->getDataGenerator()->enrol_user($bookingmanager->id, $course->id, 'editingteacher');
+
+        $categorydata = new stdClass();
+        $categorydata->name = 'BookCustomCat1';
+        $categorydata->component = 'mod_booking';
+        $categorydata->area = 'booking';
+        $categorydata->itemid = 0;
+        $categorydata->contextid = context_system::instance()->id;
+
+        $bookingcat = $this->getDataGenerator()->create_custom_field_category((array) $categorydata);
+        $bookingcat->save();
+
+        $fielddata = new stdClass();
+        $fielddata->categoryid = $bookingcat->get('id');
+        $fielddata->name = 'Sport1';
+        $fielddata->shortname = 'spt1';
+        $fielddata->type = 'text';
+        $fielddata->configdata = "{\"required\":\"0\",\"uniquevalues\":\"0\",\"locked\":\"0\",\"visibility\":\"2\",
+                                    \"defaultvalue\":\"\",\"displaysize\":30,\"maxlength\":50,\"ispassword\":\"0\",
+                                    \"link\":\"\",\"linktarget\":\"\"}";
+        $bookingfield = $this->getDataGenerator()->create_custom_field((array) $fielddata);
+        $bookingfield->save();
+        $this->assertTrue(\core_customfield\field::record_exists($bookingfield->get('id')));
+
+        /** @var mod_booking_generator $plugingenerator */
+        $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
+
+        $campaingdata2 = (object) [
+            'bofieldname' => 'spt1',
+            'fieldvalue' => 'yoga',
+            'campaignfieldnameoperator' => '!~', // Not contain.
+            'cpfield' => 'ugroup1',
+            'cpoperator' => '!~', // Not contain.
+            'cpvalue' => ["student", "employee"],
+            'blockoperator' => 'blockalways',
+            'blockinglabel' => 'multiple user fields',
+            'hascapability' => "",
+            'percentageavailableplaces' => 50,
+        ];
+        $campaing2 = [
+            'name' => 'not containing yoga no students, no employees',
+            'type' => 1,
+            'starttime' => strtotime('yesterday'),
+            'endtime' => strtotime('now + 1 month'),
+            'pricefactor' => 1,
+            'limitfactor' => 1,
+            'json' => json_encode($campaingdata2),
+        ];
+        $plugingenerator->create_campaign($campaing2);
+
+        // Create 1st booking option.
+        $record = new stdClass();
+        $record->bookingid = $booking1->id;
+        $record->text = 'Test option1';
+        $record->chooseorcreatecourse = 1; // Reqiured.
+        $record->courseid = $course->id;
+        $record->useprice = 0;
+        $record->maxanswers = 3;
+        $record->optiondateid_1 = "0";
+        $record->daystonotify_1 = "0";
+        $record->coursestarttime_1 = strtotime('now + 3 day');
+        $record->courseendtime_1 = strtotime('now + 6 day');
+        $record->customfield_spt1 = 'tennis';
+        $option1 = $plugingenerator->create_option($record);
+        singleton_service::destroy_booking_option_singleton($option1->id); // Mandatory there.
+        $settings1 = singleton_service::get_instance_of_booking_option_settings($option1->id);
+        $optionobj1 = singleton_service::get_instance_of_booking_option($settings1->cmid, $option1->id);
+        $boinfo1 = new bo_info($settings1);
+
+        // Create 2nd booking option.
+        $record->text = 'Test option2';
+        $record->customfield_spt1 = 'yoga';
+        $option2 = $plugingenerator->create_option($record);
+        singleton_service::destroy_booking_option_singleton($option2->id); // Mandatory there.
+        $settings2 = singleton_service::get_instance_of_booking_option_settings($option2->id);
+        $optionobj2 = singleton_service::get_instance_of_booking_option($settings2->cmid, $option2->id);
+        $boinfo2 = new bo_info($settings2);
+
+        // Create 3rd booking option.
+        $record->text = 'Test option3';
+        $record->customfield_spt1 = '';
+        $record->maxanswers = 6;
+        $option3 = $plugingenerator->create_option($record);
+        singleton_service::destroy_booking_option_singleton($option3->id); // Mandatory there.
+        $settings3 = singleton_service::get_instance_of_booking_option_settings($option3->id);
+        $optionobj3 = singleton_service::get_instance_of_booking_option($settings3->cmid, $option3->id);
+        $boinfo3 = new bo_info($settings3);
+
+        // Try to book options with student3.
+        $this->setUser($student3);
+        singleton_service::destroy_user($student3->id);
+        // Try to book option1 but cannot: student3 doesn't have values in the profile field.
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Option2 is not blocking because of field yoga.
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
+        $result = booking_bookit::bookit('option', $settings2->id, $student3->id);
+        $result = booking_bookit::bookit('option', $settings2->id, $student3->id);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
+        // Try to book option3 but cannot: student3 doesn't have values in the profile field.
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+    }
+
+    /**
+     * Test campaign blockbooking.
+     *
+     * @covers \condition\campaign_blockbooking::is_available
+     * @param array $bdata
+     * @throws \coding_exception
+     * @throws \dml_exception
+     *
+     * @dataProvider booking_campaigns_settings_provider
+     */
+    public function test_booking_bookit_campaign_blockbooking_extended_cases1(array $bdata): void {
+        global $DB, $CFG;
+
+        self::tearDown();
+
+        // Setup test data.
+        $course = $this->getDataGenerator()->create_course(['enablecompletion' => 1]);
+
+        $this->getDataGenerator()->create_custom_profile_field([
+            'datatype' => 'text',
+            'shortname' => 'ugroup1',
+            'name' => 'ugroup1',
+            'visible' => "2",
+        ]);
+        // Create users.
+        $student1 = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'student,employee']);
+        $student2 = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'student']);
+        $student3 = $this->getDataGenerator()->create_user();
+        $employee = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'employee']);
+        $multipleugroups = $this->getDataGenerator()->create_user(['profile_field_ugroup1' => 'employee,somethingelse']);
+        $teacher = $this->getDataGenerator()->create_user();
+        $bookingmanager = $this->getDataGenerator()->create_user(); // Booking manager.
+
+        $bdata['course'] = $course->id;
+        $bdata['bookingmanager'] = $bookingmanager->username;
+
+        $booking1 = $this->getDataGenerator()->create_module('booking', $bdata);
+
+        $this->setAdminUser();
+
+        $this->getDataGenerator()->enrol_user($student1->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($student2->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($student3->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($employee->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($multipleugroups->id, $course->id, 'student');
+        $this->getDataGenerator()->enrol_user($teacher->id, $course->id, 'editingteacher');
+        $this->getDataGenerator()->enrol_user($bookingmanager->id, $course->id, 'editingteacher');
+
+        $categorydata = new stdClass();
+        $categorydata->name = 'BookCustomCat1';
+        $categorydata->component = 'mod_booking';
+        $categorydata->area = 'booking';
+        $categorydata->itemid = 0;
+        $categorydata->contextid = context_system::instance()->id;
+
+        $bookingcat = $this->getDataGenerator()->create_custom_field_category((array) $categorydata);
+        $bookingcat->save();
+
+        $fielddata = new stdClass();
+        $fielddata->categoryid = $bookingcat->get('id');
+        $fielddata->name = 'Sport1';
+        $fielddata->shortname = 'spt1';
+        $fielddata->type = 'text';
+        $fielddata->configdata = "{\"required\":\"0\",\"uniquevalues\":\"0\",\"locked\":\"0\",\"visibility\":\"2\",
+                                    \"defaultvalue\":\"\",\"displaysize\":30,\"maxlength\":50,\"ispassword\":\"0\",
+                                    \"link\":\"\",\"linktarget\":\"\"}";
+        $bookingfield = $this->getDataGenerator()->create_custom_field((array) $fielddata);
+        $bookingfield->save();
+        $this->assertTrue(\core_customfield\field::record_exists($bookingfield->get('id')));
+
+        /** @var mod_booking_generator $plugingenerator */
+        $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
+
+        // Create 1st blocking campaing: with multiple custom user profile fields and without bofield.
+        $campaingdata1 = (object) [
+            'bofieldname' => '0',
+            'campaignfieldnameoperator' => null,
+            'fieldvalue' => '',
+            'cpfield' => 'ugroup1',
+            'cpoperator' => '!~', // Not contain.
+            'cpvalue' => ["student", "employee"],
+            'blockoperator' => 'blockalways',
+            'blockinglabel' => 'multiple user fields',
+            'hascapability' => "",
+            'percentageavailableplaces' => 50,
+        ];
+        $campaing1 = [
+            'name' => 'multiple_user_fields',
+            'type' => 1,
+            'starttime' => strtotime('yesterday'),
+            'endtime' => strtotime('now + 1 month'),
+            'pricefactor' => 1,
+            'limitfactor' => 1,
+            'json' => json_encode($campaingdata1),
+        ];
+        $plugingenerator->create_campaign($campaing1);
+
+        // Create 1st booking option.
+        $record = new stdClass();
+        $record->bookingid = $booking1->id;
+        $record->text = 'Test option1';
+        $record->chooseorcreatecourse = 1; // Reqiured.
+        $record->courseid = $course->id;
+        $record->useprice = 0;
+        $record->maxanswers = 3;
+        $record->optiondateid_1 = "0";
+        $record->daystonotify_1 = "0";
+        $record->coursestarttime_1 = strtotime('now + 3 day');
+        $record->courseendtime_1 = strtotime('now + 6 day');
+        $record->customfield_spt1 = 'tennis';
+        $option1 = $plugingenerator->create_option($record);
+        singleton_service::destroy_booking_option_singleton($option1->id); // Mandatory there.
+        $settings1 = singleton_service::get_instance_of_booking_option_settings($option1->id);
+        $optionobj1 = singleton_service::get_instance_of_booking_option($settings1->cmid, $option1->id);
+        $boinfo1 = new bo_info($settings1);
+
+        // Create 2nd booking option.
+        $record->text = 'Test option2';
+        $record->customfield_spt1 = 'yoga';
+        $option2 = $plugingenerator->create_option($record);
+        singleton_service::destroy_booking_option_singleton($option2->id); // Mandatory there.
+        $settings2 = singleton_service::get_instance_of_booking_option_settings($option2->id);
+        $optionobj2 = singleton_service::get_instance_of_booking_option($settings2->cmid, $option2->id);
+        $boinfo2 = new bo_info($settings2);
+
+        // Create 3rd booking option.
+        $record->text = 'Test option3';
+        $record->customfield_spt1 = '';
+        $record->maxanswers = 6;
+        $option3 = $plugingenerator->create_option($record);
+        singleton_service::destroy_booking_option_singleton($option3->id); // Mandatory there.
+        $settings3 = singleton_service::get_instance_of_booking_option_settings($option3->id);
+        $optionobj3 = singleton_service::get_instance_of_booking_option($settings3->cmid, $option3->id);
+        $boinfo3 = new bo_info($settings3);
+
+        // Try to book options with student1.
+        $this->setUser($student1);
+        singleton_service::destroy_user($student1->id);
+        // Book option1.
+        $result = booking_bookit::bookit('option', $settings1->id, $student1->id);
+        $result = booking_bookit::bookit('option', $settings1->id, $student1->id);
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student1->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
+
+        // Try to book options with student3.
+        $this->setUser($student3);
+        singleton_service::destroy_user($student3->id);
+        // Try to book option1 but cannot: student3 doesn't have values in the profile field.
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Try to book option2 but cannot: student3 doesn't have values in the profile field.
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        // Try to book option3 but cannot: student3 doesn't have values in the profile field.
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student3->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+
+        // Try to book options with teacher. Everything blocks because doesn't have values in the profile field.
+        $this->setUser($teacher);
+        singleton_service::destroy_user($teacher->id);
+        [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $teacher->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $teacher->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $teacher->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+
+        // Try to book options with employee.
+        $this->setUser($employee);
+        singleton_service::destroy_user($employee->id);
+        // Book option3: profile_field_ugroup1 == employee.
+        $result = booking_bookit::bookit('option', $settings3->id, $employee->id);
+        $result = booking_bookit::bookit('option', $settings3->id, $employee->id);
+        [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $employee->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
     }
 
     /**
@@ -517,7 +1077,8 @@ final class booking_campaigns_test extends advanced_testcase {
             'deletedtext' => ['text' => 'text'],
             'pollurltext' => ['text' => 'text'],
             'pollurlteacherstext' => ['text' => 'text'],
-            'notificationtext' => ['text' => 'text'], 'userleave' => ['text' => 'text'],
+            'notificationtext' => ['text' => 'text'],
+            'userleave' => ['text' => 'text'],
             'tags' => '',
             'completion' => 2,
             'showviews' => ['mybooking,myoptions,showall,showactive,myinstitution'],

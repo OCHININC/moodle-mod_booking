@@ -745,51 +745,73 @@ class price {
         // 3. Concerning no match, we can either print a message and don't allow booking, or fallback on default price category.
 
         $price = [];
-
+        unset($pricerecorddefault);
+        $pricecategoryfound = false;
         foreach ($prices as $pricerecord) {
             // We want to support string matching like category student for student@univie.ac.at.
-
             $pricecategoryidentifiers = explode(',', $pricerecord->pricecategoryidentifier);
 
-            // We store the default record as a fallback.
-            if (
-                get_config('booking', 'pricecategoryfallback')
-                && $pricerecord->pricecategoryidentifier == 'default'
-                && $categoryidentifier !== 'default'
-            ) {
-                $price = [
-                    "price" => $pricerecord->price,
-                    "currency" => $pricerecord->currency,
-                    "pricecategoryidentifier" => $pricerecord->pricecategoryidentifier,
-                    "pricecategoryname" =>
-                        self::get_active_pricecategory_from_cache_or_db($pricerecord->pricecategoryidentifier)->name,
-                ];
-            }
-
-            $pricecategoryfound = false;
             foreach ($pricecategoryidentifiers as $pricecategoryidentifier) {
-                if (strpos($categoryidentifier, $pricecategoryidentifier) !== false) {
-                    $pricecategoryfound = true;
+                // We store the default record as a fallback.
+                if ($pricecategoryidentifier == 'default') {
+                    $pricerecorddefault = $pricerecord;
                 }
-            }
-
-            if ($pricecategoryfound) {
-                $price = [
-                    "price" => $pricerecord->price,
-                    "currency" => $pricerecord->currency,
-                    "pricecategoryidentifier" => $pricerecord->pricecategoryidentifier,
-                    "pricecategoryname" =>
-                        self::get_active_pricecategory_from_cache_or_db($pricerecord->pricecategoryidentifier)->name,
-                ];
+                // Looking for matched pricecategory.
+                if (!empty($categoryidentifier) && strpos($categoryidentifier, $pricecategoryidentifier) !== false) {
+                    $pricecategoryfound = true;
+                    $price = [
+                        "price" => $pricerecord->price,
+                        "currency" => $pricerecord->currency,
+                        "pricecategoryidentifier" => $pricerecord->pricecategoryidentifier,
+                        "pricecategoryname" =>
+                            self::get_active_pricecategory_from_cache_or_db($pricerecord->pricecategoryidentifier)->name,
+                    ];
+                }
             }
         }
 
-        if ($area === "option" && isset($price['price'])) {
+        switch ((int)get_config('booking', 'pricecategoryfallback')) {
+            case 1:
+                // Logic is: when categoryidentifer is empty, we use default.
+                $usedefault = true;
+                break;
+            case 2:
+                $usedefault = false;
+                break;
+            default:
+                $usedefault = false;
+                break;
+        }
+
+        if (
+            !$pricecategoryfound
+            && $usedefault
+            && !empty($pricerecorddefault)
+        ) {
+            $price = [
+                "price" => $pricerecorddefault->price,
+                "currency" => $pricerecorddefault->currency,
+                "pricecategoryidentifier" => $pricerecorddefault->pricecategoryidentifier,
+                "pricecategoryname" =>
+                    self::get_active_pricecategory_from_cache_or_db($pricerecorddefault->pricecategoryidentifier)->name,
+            ];
+        } else if (
+            !$pricecategoryfound
+            && !$usedefault
+        ) {
+            return []; // No default for some reason (should never happen).
+        }
+
+        if (
+            $area === "option" && isset($price['price'])
+        ) {
             $customformstore = new customformstore($user->id, $itemid);
             $price['price'] = $customformstore->modify_price($price['price'], $categoryidentifier);
         }
 
-        $price['price'] = number_format($price['price'], 2, '.', '');
+        if (isset($price['price'])) {
+            $price['price'] = number_format($price['price'], 2, '.', '');
+        }
 
         return $price;
     }
@@ -838,17 +860,26 @@ class price {
         // If a user profile field to story the price category identifiers for each user has been set,
         // then retrieve it from config and set the correct category identifier for the current user.
         $fieldshortname = get_config('booking', 'pricecategoryfield');
+        $pricecategoryfallback = get_config('booking', 'pricecategoryfallback');
 
-        if (!isset($user->profile) ||
-            !isset($user->profile[$fieldshortname])) {
+        if (
+            !isset($user->profile) ||
+            !isset($user->profile[$fieldshortname])
+        ) {
 
                 require_once("$CFG->dirroot/user/profile/lib.php");
                 profile_load_custom_fields($user);
         }
 
-        if (!isset($user->profile[$fieldshortname])
-            || empty($user->profile[$fieldshortname])) {
-            $categoryidentifier = 'default'; // Default.
+        if (
+            !isset($user->profile[$fieldshortname])
+            || empty($user->profile[$fieldshortname])
+        ) {
+            if ($pricecategoryfallback == 2) {
+                $categoryidentifier = '';
+            } else {
+                $categoryidentifier = 'default'; // Default.
+            }
         } else {
             $categoryidentifier = $user->profile[$fieldshortname];
         }
@@ -886,12 +917,12 @@ class price {
         // If not, we look for the price for all.
         if ($cacheduserprices === true) {
             return [];
-        } else if ($cacheduserprices) {
+        } else if ($cacheduserprices) { // No price found.
             $prices = $cacheduserprices;
         } else {
             // Here, we haven't found a user price. We still might have a general price.
             $cachedprices = $cache->get($cachekey);
-            if ($cachedprices === true) {
+            if ($cachedprices === true) { // No price found.
                 // We set the user price, to know the next time.
                 $cache->set($usercachekey, true);
                 return [];
@@ -900,8 +931,10 @@ class price {
 
                 // At this point, we have the general prices, but we might have a user specific camapaign override.
                 // Save the user specific prices.
-                self::apply_campaigns($itemid, $prices, $userid);
-                $cache->set($usercachekey, $cachedprices);
+                if ($userid > 0) {
+                    self::apply_campaigns($itemid, $prices, $userid);
+                    $cache->set($usercachekey, $cachedprices);
+                }
             } else {
                 // Here, we haven't found user specific prices and we haven't found general prices.
                 // Therefore, we need to have a look in the DB.
@@ -921,10 +954,10 @@ class price {
                     self::apply_campaigns($itemid, $prices, 0);
                     $cache->set($cachekey, $prices);
 
-                    // Save the user specific prices.
-                    self::apply_campaigns($itemid, $prices, $userid);
-                    $cache->set($usercachekey, $prices);
-
+                    if (isloggedin() && !isguestuser()) {
+                        self::apply_campaigns($itemid, $prices, $userid);
+                        $cache->set($usercachekey, $prices);
+                    }
                 } else {
                     $cache->set($cachekey, $prices);
                     $cache->set($usercachekey, $prices);
@@ -944,7 +977,8 @@ class price {
     public static function get_active_pricecategory_from_cache_or_db(string $identifier) {
         global $DB;
 
-        if ($pricecategory = singleton_service::get_price_category($identifier)) {
+        $pricecategory = singleton_service::get_price_category($identifier);
+        if ($pricecategory != false) {
             return $pricecategory;
         }
 
@@ -955,12 +989,14 @@ class price {
         if (!$cachedpricecategory) {
             if (!$pricecategory = $DB->get_record('booking_pricecategories', ['identifier' => $identifier, 'disabled' => 0])) {
                 $cache->set($identifier, true);
+                singleton_service::set_price_category($identifier, null);
                 return null;
             }
 
             $data = json_encode($pricecategory);
             $cache->set($identifier, $data);
         } else if ($cachedpricecategory === true) {
+            singleton_service::set_price_category($identifier, null);
             return null;
         } else {
             $pricecategory = json_decode($cachedpricecategory);
@@ -1076,7 +1112,7 @@ class price {
                 foreach ($prices as &$price) {
                     $price->price = $campaign->get_campaign_price($price->price, $userid);
                     // Render all prices to 2 fixed decimals.
-                    $price->price = number_format(round((float) $price->price , 2), 2, '.', '');
+                    $price->price = number_format(round((float) $price->price, 2), 2, '.', '');
                     // Campaign price factor has been applied.
                 }
             }

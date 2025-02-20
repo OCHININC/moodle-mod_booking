@@ -269,7 +269,12 @@ class dates {
             );
         } else if (!empty($defaultvalues->id)) {
             $settings = singleton_service::get_instance_of_booking_option_settings($defaultvalues->id);
-            $sessions = $settings->sessions;
+            // Make sure, no sessions are created for self-learning courses.
+            if (empty($settings->selflearningcourse)) {
+                $sessions = $settings->sessions;
+            } else {
+                $sessions = [];
+            }
             $defaultvalues->datescounter = $datescounter;
         }
 
@@ -615,6 +620,11 @@ class dates {
         ) {
             return [];
         }
+
+        if (!empty($formdata->selflearningcourse)) {
+            return [];
+        }
+
         $newvalue = array_merge($newvalues, $datestosave);
         $changes = [
             'changes' => [

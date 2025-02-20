@@ -166,6 +166,7 @@ class mod_booking_mod_form extends moodleform_mod {
             $viewparamoptions[MOD_BOOKING_VIEW_PARAM_CARDS] = get_string('viewparam:cards', 'mod_booking');
             $viewparamoptions[MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT] = get_string('viewparam:listimgleft', 'mod_booking');
             $viewparamoptions[MOD_BOOKING_VIEW_PARAM_LIST_IMG_RIGHT] = get_string('viewparam:listimgright', 'mod_booking');
+            $viewparamoptions[MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT_HALF] = get_string('viewparam:listimglefthalf', 'mod_booking');
         }
         // Default view param (0...List view, 1...Cards view).
         $mform->addElement('select', 'viewparam', get_string('viewparam', 'mod_booking'),
@@ -336,6 +337,46 @@ class mod_booking_mod_form extends moodleform_mod {
         $mform->setType('coursepageshortinfo', PARAM_TEXT);
         // Hide short info for the first two options.
         $mform->hideIf('coursepageshortinfo', 'showlistoncoursepage', 'in', [0]);
+
+        // Booking manager.
+        $contextbooking = $this->get_context();
+        $choosepotentialmanager = [];
+        $potentials[$USER->id] = $USER;
+        $potentials1 = get_users_by_capability($contextbooking, 'mod/booking:readresponses',
+            'u.id, u.firstname, u.lastname, u.username, u.email');
+        $potentials2 = get_users_by_capability($contextbooking, 'moodle/course:update',
+            'u.id, u.firstname, u.lastname, u.username, u.email');
+        $potentialmanagers = array_merge($potentials1, $potentials2, $potentials);
+
+        // Before creating the array, we have to check if there is a booking manager already set.
+        // If so, but the user has left the course, an arbitrary value will be shown. Therefore we add the...
+        // ... existing bookingmanager to the array.
+        if (((int)$this->_instance)
+            && ($existingmanager = $DB->get_field('booking', 'bookingmanager', ['id' => $this->_instance]))) {
+            if ($existinguser = $DB->get_record('user', ['username' => $existingmanager])) {
+                $found = false;
+                foreach ($potentialmanagers as $user) {
+                    if ($user->id == $existinguser->id) {
+                        $found = true;
+                    }
+                }
+                if (!$found) {
+                    $potentialmanagers = array_merge($potentialmanagers, [$existinguser]);
+                }
+            }
+        }
+
+        foreach ($potentialmanagers as $potentialmanager) {
+            $choosepotentialmanager[$potentialmanager->username] = $potentialmanager->firstname
+                    . ' ' . $potentialmanager->lastname . ' (' .
+            $potentialmanager->email . ')';
+        }
+        $mform->addElement('autocomplete', 'bookingmanager',
+                get_string('usernameofbookingmanager', 'booking'), $choosepotentialmanager);
+        $mform->addHelpButton('bookingmanager', 'usernameofbookingmanager', 'booking');
+        $mform->setType('bookingmanager', PARAM_TEXT);
+        $mform->setDefault('bookingmanager', $USER->username);
+        $mform->addRule('bookingmanager', null, 'required', null, 'client');
 
         // Configure fields and columns section.
         $mform->addElement('header', 'configurefields', get_string('configurefields', 'booking'));
@@ -551,46 +592,6 @@ class mod_booking_mod_form extends moodleform_mod {
             $mform->addHelpButton('daystonotifyteachers', 'daystonotify', 'booking');
             $mform->setType('daystonotifyteachers', PARAM_INT);
 
-            // Booking manager.
-            $contextbooking = $this->get_context();
-            $choosepotentialmanager = [];
-            $potentials[$USER->id] = $USER;
-            $potentials1 = get_users_by_capability($contextbooking, 'mod/booking:readresponses',
-                'u.id, u.firstname, u.lastname, u.username, u.email');
-            $potentials2 = get_users_by_capability($contextbooking, 'moodle/course:update',
-                'u.id, u.firstname, u.lastname, u.username, u.email');
-            $potentialmanagers = array_merge ($potentials1, $potentials2, $potentials);
-
-            // Before creating the array, we have to check if there is a booking manager already set.
-            // If so, but the user has left the course, an arbitrary value will be shown. Therefore we add the...
-            // ... existing bookingmanager to the array.
-            if (((int)$this->_instance)
-                && ($existingmanager = $DB->get_field('booking', 'bookingmanager', ['id' => $this->_instance]))) {
-                if ($existinguser = $DB->get_record('user', ['username' => $existingmanager])) {
-                    $found = false;
-                    foreach ($potentialmanagers as $user) {
-                        if ($user->id == $existinguser->id) {
-                            $found = true;
-                        }
-                    }
-                    if (!$found) {
-                        $potentialmanagers = array_merge($potentialmanagers, [$existinguser]);
-                    }
-                }
-            }
-
-            foreach ($potentialmanagers as $potentialmanager) {
-                $choosepotentialmanager[$potentialmanager->username] = $potentialmanager->firstname
-                        . ' ' . $potentialmanager->lastname . ' (' .
-                $potentialmanager->email . ')';
-            }
-            $mform->addElement('autocomplete', 'bookingmanager',
-                    get_string('usernameofbookingmanager', 'booking'), $choosepotentialmanager);
-            $mform->addHelpButton('bookingmanager', 'usernameofbookingmanager', 'booking');
-            $mform->setType('bookingmanager', PARAM_TEXT);
-            $mform->setDefault('bookingmanager', $USER->username);
-            $mform->addRule('bookingmanager', null, 'required', null, 'client');
-
             $mailtemplatessource = [];
             $mailtemplatessource[0] = get_string('mailtemplatesinstance', 'booking');
             $mailtemplatessource[1] = get_string('mailtemplatesglobal', 'booking');
@@ -779,15 +780,29 @@ class mod_booking_mod_form extends moodleform_mod {
         // Cancel date is either absolute or relative to defined start.
         $strid = 'cdo:' . $canceldependenton;
         $a = get_string($strid, 'mod_booking');
-        $mform->addElement('advcheckbox', 'cancelrelativedate', get_string('cancancelbookrelative', 'mod_booking', $a));
+
+        $canceloptions = [
+            0 => get_string('cancancelbookabsolute', 'mod_booking'),
+            1 => get_string('cancancelbookrelative', 'mod_booking', $a),
+            2 => get_string('cancancelbookunlimited', 'mod_booking'),
+        ];
+
+        $mform->addElement(
+            'select',
+            'cancelrelativedate',
+            get_string('cancancelbooksetting', 'booking'),
+            $canceloptions
+        );
+        $mform->addHelpButton('cancelrelativedate', 'cancancelbooksetting', 'mod_booking');
+
         $mform->hideIf('cancelrelativedate', 'cancancelbook', 'eq', 0);
-        $mform->hideIf('cancelrelativedate', 'disablecancel', 'eq', 1);
+        $mform->hideIf('cancelrelativedate', 'disablecancel', 'neq', 0);
         $mform->setDefault('cancelrelativedate',
         (int)booking::get_value_of_json_by_key($bookingid, 'cancelrelativedate') ?? 1);
 
         $mform->addElement('date_time_selector', 'allowupdatetimestamp', get_string('canceldateabsolute', 'mod_booking'));
         $mform->hideIf('allowupdatetimestamp', 'cancancelbook', 'eq', 0);
-        $mform->hideIf('allowupdatetimestamp', 'cancelrelativedate', 'eq', 1);
+        $mform->hideIf('allowupdatetimestamp', 'cancelrelativedate', 'neq', 0);
         $mform->setDefault('allowupdatetimestamp',
         booking::get_value_of_json_by_key($bookingid, 'allowupdatetimestamp') ?? '');
 
@@ -795,7 +810,7 @@ class mod_booking_mod_form extends moodleform_mod {
         $extraopts = array_combine(range(-100, 100), range(-100, 100));
         $opts = $opts + $extraopts;
         $mform->addElement('select', 'allowupdatedays', $cancancelbookdaysstring, $opts);
-        $mform->hideIf('allowupdatedays', 'cancelrelativedate', 'eq', 0);
+        $mform->hideIf('allowupdatedays', 'cancelrelativedate', 'neq', 1);
 
         $mform->setDefault('allowupdatedays', 10000); // One million means "no limit".
         $mform->disabledIf('allowupdatedays', 'cancancelbook', 'eq', 0);

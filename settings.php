@@ -69,7 +69,7 @@ $ADMIN->add(
         get_string('optionformconfig', 'mod_booking'),
         new moodle_url('/mod/booking/optionformconfig.php', [
             'cmid' => 0,
-            ])
+        ])
     )
 );
 
@@ -163,7 +163,7 @@ if ($ADMIN->fulltree) {
             'licensekeycfgheading',
             get_string('licensekeycfg', 'mod_booking'),
             $proversion ? get_string('licensekeycfgdesc:active', 'mod_booking') :
-                get_string('licensekeycfgdesc', 'mod_booking')
+            get_string('licensekeycfgdesc', 'mod_booking')
         )
     );
 
@@ -329,6 +329,24 @@ if ($ADMIN->fulltree) {
             ''
         )
     );
+
+    // Custom fields to be shown on detail page (optionview.php).
+    $customfields = booking_handler::get_customfields();
+    if (!empty($customfields)) {
+        $customfieldshortnames = [];
+        foreach ($customfields as $cf) {
+            $customfieldshortnames[$cf->shortname] = "$cf->name ($cf->shortname)";
+        }
+        $settings->add(
+            new admin_setting_configmultiselect(
+                'booking/optionviewcustomfields',
+                get_string('optionviewcustomfields', 'mod_booking'),
+                get_string('optionviewcustomfieldsdesc', 'mod_booking'),
+                [],
+                $customfieldshortnames
+            )
+        );
+    }
 
     $settings->add(
         new admin_setting_configcheckbox(
@@ -730,6 +748,14 @@ if ($ADMIN->fulltree) {
             )
         );
         $settings->add(
+            new admin_setting_configcheckbox(
+                'booking/selflearningcoursehideduration',
+                get_string('selflearningcoursehideduration', 'mod_booking'),
+                '',
+                0
+            )
+        );
+        $settings->add(
             new admin_setting_configtext(
                 'booking/selflearningcourselabel',
                 get_string('selflearningcourselabel', 'mod_booking'),
@@ -906,6 +932,15 @@ if ($ADMIN->fulltree) {
         )
     );
 
+    $settings->add(
+        new admin_setting_configcheckbox(
+            'booking/showpriceifnotloggedin',
+            get_string('showpriceifnotloggedin', 'mod_booking'),
+            '',
+            1
+        )
+    );
+
     // Choose the user profile field which is used to store each user's price category.
     $userprofilefieldsarray[0] = get_string('userprofilefieldoff', 'mod_booking');
     $userprofilefields = profile_get_custom_fields();
@@ -926,12 +961,20 @@ if ($ADMIN->fulltree) {
             $userprofilefieldsarray
         )
     );
+
+    $defaultbehaviours = [
+        0 => get_string('fallbackonlywhenempty', 'booking'),
+        1 => get_string('fallbackonlywhennotmatching', 'booking'),
+        2 => get_string('fallbackturnedoff', 'booking'),
+    ];
+
     $settings->add(
-        new admin_setting_configcheckbox(
+        new admin_setting_configselect(
             'booking/pricecategoryfallback',
             get_string('pricecategoryfallback', 'mod_booking'),
             get_string('pricecategoryfallback_desc', 'mod_booking'),
-            0
+            0,
+            $defaultbehaviours
         )
     );
 
@@ -1377,10 +1420,12 @@ if ($ADMIN->fulltree) {
         )
     );
 
-    $options = [1 => get_string('courseurl', 'mod_booking'),
-                2 => get_string('location', 'mod_booking'),
-                3 => get_string('institution', 'mod_booking'), 4 => get_string('address'),
-            ];
+    $options = [
+        1 => get_string('courseurl', 'mod_booking'),
+        2 => get_string('location', 'mod_booking'),
+        3 => get_string('institution', 'mod_booking'),
+        4 => get_string('address'),
+    ];
     $settings->add(
         new admin_setting_configselect(
             'booking/icalfieldlocation',
@@ -1467,6 +1512,34 @@ if ($ADMIN->fulltree) {
         $description = get_string('signinextracols_desc', 'mod_booking') . " $i";
         $setting = new admin_setting_configtext($name, $visiblename, $description, '');
         $settings->add($setting);
+    }
+
+    if ($proversion) {
+        // Global mail templates (PRO).
+        $settings->add(
+            new admin_setting_heading(
+                'mobile_settings',
+                get_string('mobilesettings', 'mod_booking'),
+                get_string('mobilesettings_desc', 'mod_booking')
+            )
+        );
+
+        $whichviewopts = [
+            'showall' => get_string('showallbookingoptions', 'booking'),
+            'mybooking' => get_string('showmybookingsonly', 'booking'),
+            'myoptions' => get_string('optionsiteach', 'booking'),
+            'showactive' => get_string('activebookingoptions', 'booking'),
+            'myinstitution' => get_string('myinstitution', 'booking'),
+            'showvisible' => get_string('visibleoptions', 'booking'),
+            'showinvisible' => get_string('invisibleoptions', 'booking'),
+        ];
+        $settings->add(new admin_setting_configmultiselect(
+            'booking/mobileviewoptions',
+            get_string('mobileviewoptionstext', 'booking'),
+            get_string('mobileviewoptionsdesc', 'booking'),
+            [],
+            $whichviewopts
+        ));
     }
 
     // Global mail templates (PRO).

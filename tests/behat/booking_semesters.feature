@@ -18,6 +18,7 @@ Feature: As a teacher - configure and use booking's semesters feature.
       | admin1   | C1     | manager        |
       | student1 | C1     | student        |
       | student2 | C1     | student        |
+    And I clean booking cache
     And the following "mod_booking > semesters" exist:
       | identifier | name       | startdate                         | enddate                            |
       | nextmay    | NextMay    | ## first day of May next year ##  | ## last day of May next year ##    |
@@ -61,7 +62,7 @@ Feature: As a teacher - configure and use booking's semesters feature.
     And I press "Create date series"
     And I wait "1" seconds
     And I should see "## + 1 year ##%Y##" in the "#booking_optiondate_1" "css_element"
-    And I should see "1:00 PM - 2:00 PM" in the "#booking_optiondate_1" "css_element"
+    And I should see "1:00 PM - 2:00 PM" in the "#booking_optiondate_1" "css_element"
     And I should see "Friday" in the "#booking_optiondate_1" "css_element"
     And I should see "June" in the "#booking_optiondate_1" "css_element"
     And I should see "July" in the "#booking_optiondate_6" "css_element"
@@ -72,6 +73,6 @@ Feature: As a teacher - configure and use booking's semesters feature.
     And I click on "Show dates" "link" in the ".allbookingoptionstable_r1" "css_element"
     And I wait "1" seconds
     And I should see "## + 1 year ##%Y##" in the ".allbookingoptionstable_r1 .showdates" "css_element"
-    And I should see "1:00 PM - 2:00 PM" in the ".allbookingoptionstable_r1 .showdates" "css_element"
+    And I should see "1:00 PM - 2:00 PM" in the ".allbookingoptionstable_r1 .showdates" "css_element"
     And I should see "June" in the ".allbookingoptionstable_r1 .showdates" "css_element"
     And I should see "July" in the ".allbookingoptionstable_r1 .showdates" "css_element"

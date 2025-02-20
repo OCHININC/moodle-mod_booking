@@ -3932,5 +3932,42 @@ function xmldb_booking_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2024112604, 'booking');
     }
 
+    if ($oldversion < 2024121600) {
+
+        // Fetch all booking options where availability is empty or null.
+        $records = $DB->get_records_select('booking_options', "availability = '' OR availability IS NULL");
+
+        foreach ($records as $record) {
+            $record->availability = '[]'; // Update the availability field.
+            $DB->update_record('booking_options', $record);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2024121600, 'booking');
+    }
+
+    if ($oldversion < 2024121701) {
+
+        // Define field isactive to be added to booking_rules.
+        $table = new xmldb_table('booking_rules');
+        $field = new xmldb_field('isactive', XMLDB_TYPE_INTEGER, '2', null, null, null, '1', 'useastemplate');
+
+        // Conditionally launch add field isactive.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2024121701, 'booking');
+    }
+
+    if ($oldversion < 2025010803) {
+        // Remove values form completiongradeitemnumber and completionpassgrade to avoid #779 error after #629.
+        remove_completiongradeitemnumber_2025010803();
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025010803, 'booking');
+    }
+
     return true;
 }

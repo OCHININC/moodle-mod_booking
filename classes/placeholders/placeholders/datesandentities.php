@@ -25,6 +25,7 @@
 namespace mod_booking\placeholders\placeholders;
 
 use core_plugin_manager;
+use html_writer;
 use mod_booking\option\dates_handler;
 use mod_booking\output\optiondates_only;
 use mod_booking\output\optiondates_with_entities;
@@ -90,9 +91,26 @@ class datesandentities {
             }
             /** @var renderer $output*/
             $output = $PAGE->get_renderer('mod_booking');
+            if ($settings->selflearningcourse == 1) {
+                $ba = singleton_service::get_instance_of_booking_answers($settings);
 
-            // For the moment, we only support locations from entities plugin.
-            if (class_exists('local_entities\entitiesrelation_handler')) {
+                $value = get_string('selflearningcourseplaceholder', 'mod_booking');
+
+                if (
+                    $settings->duration > 0
+                    && isset($ba->usersonlist[$userid])
+                ) {
+                    $timebooked = $ba->usersonlist[$userid]->timecreated;
+                    $timeremainingsec = $timebooked + $settings->duration - time();
+                    // We want to round up, to not have strange messages.
+                    $hours = ceil($timeremainingsec / 3600);
+                    $timeremainingsec = $hours * 3600;
+
+                    $durationstring = format_time($timeremainingsec);
+                    $value .= " " . get_string('selflearningcourseplaceholderduration', 'mod_booking', $durationstring);
+                    $value = html_writer::tag('p', $value);
+                }
+            } else if (class_exists('local_entities\entitiesrelation_handler')) {
                 $data = new optiondates_with_entities($settings);
                 $value = $output->render_optiondates_with_entities($data);
             } else {

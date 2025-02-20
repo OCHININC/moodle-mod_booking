@@ -149,7 +149,12 @@ class campaignslist implements renderable, templatable {
                     break;
                 default:
             }
-            $b->cpvalue = $campaignobj->cpvalue ?? "";
+            if (is_array($campaignobj->cpvalue)) {
+                $b->cpvalue = implode(', ', $campaignobj->cpvalue);
+            } else {
+                $b->cpvalue = $campaignobj->cpvalue;
+            }
+
             $data['cpfield'] = get_string('campaigndescriptioncpvalue', 'mod_booking', $b);
         }
 

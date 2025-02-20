@@ -61,6 +61,9 @@ class rule_daysbefore implements booking_rule {
     /** @var string $datefield */
     public $datefield = null;
 
+    /** @var bool $ruleisactive */
+    public $ruleisactive = true;
+
     /**
      * Load json data from DB into the object.
      * @param stdClass $record a rule record from DB
@@ -68,6 +71,7 @@ class rule_daysbefore implements booking_rule {
     public function set_ruledata(stdClass $record) {
         $this->ruleid = $record->id ?? 0;
         $this->contextid = $record->contextid ?? 1; // 1 is system.
+        $this->ruleisactive = $record->isactive;
         $this->set_ruledata_from_json($record->rulejson);
     }
 
@@ -199,6 +203,7 @@ class rule_daysbefore implements booking_rule {
         $record->rulejson = json_encode($jsonobject);
         $record->rulename = $this->rulename;
         $record->contextid = $data->contextid ?? 1;
+        $record->isactive = $data->ruleisactive;
 
         // If we can update, we add the id here.
         if ($data->id ?? false) {
@@ -225,6 +230,7 @@ class rule_daysbefore implements booking_rule {
         $data->rule_name = $jsonobject->name;
         $data->rule_daysbefore_days = $ruledata->days;
         $data->rule_daysbefore_datefield = $ruledata->datefield;
+        $data->ruleisactive = $record->isactive;
     }
 
     /**
@@ -279,6 +285,10 @@ class rule_daysbefore implements booking_rule {
      * @return bool true if the rule still applies, false if not
      */
     public function check_if_rule_still_applies(int $optionid, int $userid, int $nextruntime): bool {
+
+        if (empty($this->ruleisactive)) {
+            return false;
+        }
 
         $rulestillapplies = true;
 

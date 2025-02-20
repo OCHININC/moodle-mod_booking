@@ -65,11 +65,10 @@ function editRulesModal(element) {
     if (action == "delete") {
         // A rule is deleted.
         const deleteForm = new ModalForm({
-
             // Name of the class where form is defined (must extend \core_form\dynamic_form):
             formClass: "mod_booking\\form\\deleteruleform",
             // Add as many arguments as you need, they will be passed to the form:
-            args: {id: ruleid, name: name},
+            args: {id: ruleid, name: name, contextid: contextid},
             // Pass any configuration settings to the modal dialogue, for example, the title:
             modalConfig: {
                 title: getString('deletebookingrule', 'mod_booking')

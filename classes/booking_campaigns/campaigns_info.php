@@ -229,6 +229,18 @@ class campaigns_info {
     }
 
     /**
+     * Destroys all campaigns in db and singleton.
+     * @return bool
+     */
+    public static function delete_all_campaigns(): bool {
+        global $DB;
+        $DB->delete_records('booking_campaigns');
+        singleton_service::destroy_all_campaigns();
+        return true;
+    }
+
+
+    /**
      * Get all campaigns from DB - but already instantiated.
      * @return array
      */
@@ -341,7 +353,7 @@ class campaigns_info {
 
             // Create an array of key => value pairs for the dropdown.
             foreach ($customuserprofilefields as $customuserprofilefield) {
-                $customuserprofilefieldsarray[$customuserprofilefield->shortname] = $customuserprofilefield->name;
+                $customuserprofilefieldsarray[$customuserprofilefield->shortname] = format_string($customuserprofilefield->name);
             }
 
             $mform->addElement('select', 'cpfield',
@@ -359,10 +371,155 @@ class campaigns_info {
                 get_string('blockoperator', 'mod_booking'), $operators);
             $mform->hideIf('cpoperator', 'cpfield', 'eq', "0");
 
-            $mform->addElement('text', 'cpvalue',
-                get_string('textfield', 'mod_booking'));
+            $fieldnames = [];
+            if (!empty($ajaxformdata["cpfield"])) {
+                // Profile field value.
+                $sql = "
+                    SELECT DISTINCT
+                        uid.data AS fieldvalue
+                    FROM
+                        {user_info_data} uid
+                    JOIN
+                        {user_info_field} uif ON uif.id = uid.fieldid
+                    WHERE
+                        uif.shortname = :shortname
+                    AND
+                        uid.data IS NOT NULL
+                    AND
+                        uid.data != ''
+                    ORDER BY
+                        uid.data ASC";
+                // Propositions will only be displayed if form was saved before - and therefore fieldname is set.
+                // Maybe add a nosubmitbutton to fetch fieldnames.
+                $params = [
+                    'shortname' => $ajaxformdata["cpfield"],
+                ];
+                $records = $DB->get_fieldset_sql($sql, $params);
+
+                foreach ($records as $record) {
+                    $fieldnames[$record] = $record;
+                }
+            }
+            $mform->addElement(
+                'autocomplete',
+                'cpvalue',
+                get_string('textfield', 'mod_booking'),
+                $fieldnames,
+                ['multiple' => true, 'tags' => true]
+            );
+            $mform->registerNoSubmitButton('btn_cpfield');
+            $mform->addElement(
+                'submit',
+                'btn_cpfield',
+                'btn_cpfield_label',
+                ['class' => 'd-none']
+            );
+
             $mform->setType('cpvalue', PARAM_TEXT);
             $mform->hideIf('cpvalue', 'cpfield', 'eq', "0");
         }
+    }
+
+    /**
+     * If any of the fields apply to the user, return true.
+     *
+     * @param array $fields
+     * @param string $fieldname
+     * @param string $operator
+     * @param int $userid
+     *
+     * @return boolean
+     *
+     */
+    public static function check_if_profilefield_applies(
+        array $fields,
+        string $fieldname,
+        string $operator,
+        int $userid = 0
+    ): bool {
+        global $USER;
+        $result = false;
+        $userid = $userid ?? $USER->id;
+
+        $user = singleton_service::get_instance_of_user($userid, true);
+
+        foreach ($fields as $field) {
+            if (!is_string($field)) {
+                continue;
+            }
+            switch ($operator) {
+                case "=": // Equals.
+                    if ($blocking = $user->profile[$fieldname] === $field) {
+                        return true;
+                    }
+                    break;
+                case "~": // Contains.
+                    if ($blocking = strpos($user->profile[$fieldname], $field) !== false) {
+                        return true;
+                    }
+                    break;
+                case "!~":
+                    // Does not contain.
+                    if (!$blocking = strpos($user->profile[$fieldname], $field) === false) {
+                        return false;
+                    }
+                    break;
+            }
+            $result = $blocking;
+        }
+        return $result;
+    }
+
+    /**
+     * Check if given campaign is active.
+     *
+     * @param int $starttime
+     * @param int $endtime
+     * @param mixed $fieldname // The name given in the bookingoptionfield.
+     * @param string $fieldvalue // The value required or excluded by campaign.
+     * @param string $operator
+     *
+     * @return bool
+     *
+     */
+    public static function check_if_campaign_is_active(
+        int $starttime,
+        int $endtime,
+        $fieldname,
+        string $fieldvalue,
+        string $operator
+    ): bool {
+        $isactive = false;
+        $now = time();
+        if ($starttime <= $now && $now <= $endtime) {
+            if (!empty($fieldname)) {
+                if (is_string($fieldname) && $fieldname === $fieldvalue) {
+                    // It's a string so we can compare directly.
+                    $isactive = true;
+                } else if (is_array($fieldname) && in_array($fieldvalue, $fieldname)) {
+                    // It's an array, so we check with in_array.
+                    $isactive = true;
+                }
+                if (
+                    $operator === '!~'
+                ) {
+                    // If operator is set to "does not contain" we need to invert the result.
+                    $isactive = !$isactive;
+                }
+            } else if (
+                !empty($fieldvalue)
+                && $operator == '!~'
+            ) {
+                $isactive = true;
+            } else if (
+                empty($fieldvalue) &&
+                empty($fieldname)
+            ) { // No fieldname given in option, and fieldname required in campaign with "does not contain".
+                $isactive = true;
+            } else {
+                $isactive = false; // No fieldname given in option but fieldname required in campaign.
+            }
+        }
+        return $isactive;
     }
 }

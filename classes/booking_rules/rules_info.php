@@ -99,28 +99,59 @@ class rules_info {
         $buttonargs = ['class' => 'd-none'];
 
         $mform->registerNoSubmitButton('btn_bookingruletemplates');
-        $mform->addElement('select', 'bookingruletemplate',
-              get_string('bookingruletemplates', 'mod_booking'), $templates);
-        $mform->addElement('submit', 'btn_bookingruletemplates',
-              get_string('bookingruletemplates', 'mod_booking'), $buttonargs);
+        $mform->addElement(
+            'select',
+            'bookingruletemplate',
+            get_string('bookingruletemplates', 'mod_booking'),
+            $templates
+        );
+        $mform->addElement(
+            'submit',
+            'btn_bookingruletemplates',
+            get_string('bookingruletemplates', 'mod_booking'),
+            $buttonargs
+        );
         $mform->setType('btn_bookingruletemplates', PARAM_NOTAGS);
 
         if (has_capability('mod/booking:manageoptiontemplates', context_system::instance())) {
-            $mform->addElement('advcheckbox', 'useastemplate',
-                get_string('bookinguseastemplate', 'mod_booking'));
+            $mform->addElement(
+                'advcheckbox',
+                'useastemplate',
+                get_string('bookinguseastemplate', 'mod_booking')
+            );
         }
+        $mform->addElement(
+            'advcheckbox',
+            'ruleisactive',
+            get_string('bookingruleapply', 'mod_booking'),
+            get_string('bookingruleapplydesc', 'mod_booking'),
+            null,
+            null,
+            [0, 1]
+        );
+        // Fetch data for default value.
+        $active = (isset($ajaxformdata['isactive']) && empty($ajaxformdata['isactive'])) ? 0 : 1;
+        $mform->setDefault('ruleisactive', $active);
 
         $mform->registerNoSubmitButton('btn_bookingruletype');
-        $mform->addElement('select', 'bookingruletype',
-            get_string('bookingrule', 'mod_booking'), $rulesforselect);
-        $mform->addElement('submit', 'btn_bookingruletype',
-            get_string('bookingrule', 'mod_booking'), $buttonargs);
+        $mform->addElement(
+            'select',
+            'bookingruletype',
+            get_string('bookingrule', 'mod_booking'),
+            $rulesforselect
+        );
+        $mform->addElement(
+            'submit',
+            'btn_bookingruletype',
+            get_string('bookingrule', 'mod_booking'),
+            $buttonargs
+        );
         $mform->setType('btn_bookingruletype', PARAM_NOTAGS);
 
         if (isset($ajaxformdata['bookingruletype'])) {
             $rule = self::get_rule($ajaxformdata['bookingruletype']);
         } else {
-            list($rule) = $rules;
+            [$rule] = $rules;
         }
 
         // We skip if no rule was selected.
@@ -215,6 +246,7 @@ class rules_info {
 
         // These function just add their bits to the object.
         $data->useastemplate = $record->useastemplate;
+        $data->ruleisactive = isset($record->ruleisactive) ? $record->ruleisactive : 1;
         $condition->set_defaults($data, $record);
         $action->set_defaults($data, $record);
         $rule->set_defaults($data, $record);
@@ -362,7 +394,6 @@ class rules_info {
 
         // Now we check all the existing rules from booking.
         foreach ($records as $record) {
-            // TODO this needs to be updated: Maybe rulename with namespace from event.
             $rule = self::get_rule($record->rulename);
 
             // THIS is the place where we need to add event data to the rulejson!
@@ -408,11 +439,15 @@ class rules_info {
         foreach ($allrules as $ruleid => $rulearray) {
             // Run through all the excluded rules of this array and unset them.
             $rule = $rulearray['rule'];
+
+            if (empty($rule->ruleisactive)) {
+                // Inactive rules can't exculde others.
+                continue;
+            }
             $ruleobject = json_decode($rule->rulejson);
             $ruledata = $ruleobject->ruledata;
             if (!empty($ruledata->cancelrules)) {
                 foreach ($ruledata->cancelrules as $cancelrule) {
-
                     foreach ($rulestoexecute as $key => $rulearray) {
                         if ($rulearray['ruleid'] == $cancelrule) {
                             unset($rulestoexecute[$key]);
@@ -425,6 +460,10 @@ class rules_info {
 
         foreach ($rulestoexecute as $key => $rulearray) {
             $rule = $rulearray['rule'];
+            if (empty($rule->ruleisactive)) {
+                // Inactive rules are not executed.
+                continue;
+            }
             // Make sure we don't execute this multiple times.
             unset($rulestoexecute[$key]);
             unset(self::$rulestoexecute[$key]);
