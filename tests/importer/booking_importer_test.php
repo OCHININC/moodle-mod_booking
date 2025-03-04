@@ -43,7 +43,6 @@ use mod_booking\importer\bookingoptionsimporter;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 final class booking_importer_test extends advanced_testcase {
-
     /**
      * Tests set up.
      */
@@ -82,11 +81,14 @@ final class booking_importer_test extends advanced_testcase {
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
         $pricecat1 = $plugingenerator->create_pricecategory(
-                ['ordernum' => '1', 'identifier' => 'default', 'name' => 'Price', 'defaultvalue' => '12']);
+            ['ordernum' => '1', 'identifier' => 'default', 'name' => 'Price', 'defaultvalue' => '12', 'pricecatsortorder' => 1]
+        );
         $pricecat2 = $plugingenerator->create_pricecategory(
-                ['ordernum' => '2', 'identifier' => 'intern', 'name' => 'Intern', 'defaultvalue' => '13']);
+            ['ordernum' => '2', 'identifier' => 'intern', 'name' => 'Intern', 'defaultvalue' => '13', 'pricecatsortorder' => 2]
+        );
         $testsemester = $plugingenerator->create_semester(
-                ['identifier' => 'fall2023', 'name' => 'Fall 2023', 'startdate' => '1695168000', 'enddate' => '1704067140']);
+            ['identifier' => 'fall2023', 'name' => 'Fall 2023', 'startdate' => '1695168000', 'enddate' => '1704067140']
+        );
         // For tests startdate = bookingopeningtime = 20.09.2023 00:00 and enddate = bookingclosingtime = 31.12.2023 23:59 GMT.
 
         // Setup booking defaults and create booking course module.
@@ -97,7 +99,7 @@ final class booking_importer_test extends advanced_testcase {
             'pollurlteacherstext' => ['text' => 'text'],
             'notificationtext' => ['text' => 'text'], 'userleave' => ['text' => 'text'],
             'bookingpolicy' => 'bookingpolicy', 'tags' => '', 'completion' => 2,
-            'showviews' => ['showall,showactive,mybooking,myoptions,myinstitution'],
+            'showviews' => ['showall,showactive,mybooking,myoptions,optionsiamresponsiblefor,myinstitution'],
             'optionsfields' =>
             ['description', 'statusdescription', 'teacher', 'showdates', 'dayofweektime', 'location', 'institution', 'minanswers'],
             'semesterid' => $testsemester->id,
@@ -138,8 +140,8 @@ final class booking_importer_test extends advanced_testcase {
 
         // Perform import of CSV: 3 new booking options have to be created.
         $res = $bookingcsvimport1->execute_bookingoptions_csv_import(
-                                    $formdata,
-                                    file_get_contents($this->get_full_path_of_csv_file('options_coma_new', '01')),
+            $formdata,
+            file_get_contents($this->get_full_path_of_csv_file('options_coma_new', '01')),
         );
         // Check success of import process.
         $this->assertIsArray($res);
@@ -251,6 +253,6 @@ final class booking_importer_test extends advanced_testcase {
      * @return string full path of file.
      */
     protected function get_full_path_of_csv_file(string $setname, string $test): string {
-        return  __DIR__."/../fixtures/{$setname}{$test}.csv";
+        return  __DIR__ . "/../fixtures/{$setname}{$test}.csv";
     }
 }

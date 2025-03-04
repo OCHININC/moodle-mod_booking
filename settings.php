@@ -22,6 +22,7 @@
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+use mod_booking\booking_option;
 use mod_booking\customfield\booking_handler;
 
 defined('MOODLE_INTERNAL') || die();
@@ -31,6 +32,7 @@ global $CFG, $DB, $ADMIN, $DB;
 require_once($CFG->dirroot . '/mod/booking/lib.php');
 require_once($CFG->dirroot . '/user/profile/lib.php');
 
+use mod_booking\booking;
 use mod_booking\price;
 use mod_booking\utils\wb_payment;
 
@@ -390,6 +392,34 @@ if ($ADMIN->fulltree) {
 
     $settings->add(
         new admin_setting_configcheckbox(
+            'booking/responsiblecontactenroltocourse',
+            get_string('responsiblecontactenroltocourse', 'mod_booking'),
+            get_string('responsiblecontactenroltocourse_desc', 'mod_booking'),
+            0
+        )
+    );
+
+    $courseroleids = [0 => ''];
+    $allrolenames = role_get_names();
+    $assignableroles = get_roles_for_contextlevels(CONTEXT_COURSE);
+    foreach ($allrolenames as $value) {
+        if (in_array($value->id, $assignableroles)) {
+            $courseroleids[$value->id] = $value->localname;
+        }
+    }
+
+    $settings->add(
+        new admin_setting_configselect(
+            'booking/definedresponsiblecontactrole',
+            get_string('definedresponsiblecontactrole', 'mod_booking'),
+            get_string('definedresponsiblecontactrole_desc', 'mod_booking'),
+            0,
+            $courseroleids
+        )
+    );
+
+    $settings->add(
+        new admin_setting_configcheckbox(
             'booking/maxperuserdontcountpassed',
             get_string('maxperuserdontcountpassed', 'mod_booking'),
             get_string('maxperuserdontcountpassed_desc', 'mod_booking'),
@@ -489,6 +519,15 @@ if ($ADMIN->fulltree) {
 
     $settings->add(
         new admin_setting_configcheckbox(
+            'booking/showbookingdetailstoall',
+            get_string('showbookingdetailstoall', 'mod_booking'),
+            get_string('showbookingdetailstoall_desc', 'mod_booking'),
+            0
+        )
+    );
+
+    $settings->add(
+        new admin_setting_configcheckbox(
             'booking/bookingdebugmode',
             get_string('bookingdebugmode', 'mod_booking'),
             get_string('bookingdebugmode_desc', 'mod_booking'),
@@ -496,8 +535,53 @@ if ($ADMIN->fulltree) {
         )
     );
 
-    // PRO feature: Teacher settings.
+    $settings->add(
+        new admin_setting_configcheckbox(
+            'booking/shortcodesoff',
+            get_string('shortcodesoff', 'mod_booking'),
+            get_string('shortcodesoff_desc', 'mod_booking'),
+            0
+        )
+    );
+
     if ($proversion) {
+        // PRO feature: Bookings tracker.
+        $settings->add(
+            new admin_setting_heading(
+                'bookingstrackerheading',
+                get_string('bookingstracker', 'mod_booking')
+                    . " " . get_string('badge:pro', 'mod_booking')
+                    . " " . get_string('badge:exp', 'mod_booking'),
+                ""
+            )
+        );
+        $settings->add(
+            new admin_setting_configcheckbox(
+                'booking/bookingstracker',
+                get_string('bookingstracker', 'mod_booking'),
+                get_string('bookingstracker_desc', 'mod_booking'),
+                0
+            )
+        );
+        $settings->add(
+            new admin_setting_configcheckbox(
+                'booking/bookingstrackerpresencecounter',
+                get_string('bookingstrackerpresencecounter', 'mod_booking'),
+                get_string('bookingstrackerpresencecounter_desc', 'mod_booking'),
+                0
+            )
+        );
+        $settings->add(
+            new admin_setting_configselect(
+                'booking/bookingstrackerpresencecountervaluetocount',
+                get_string('bookingstrackerpresencecountervaluetocount', 'mod_booking'),
+                get_string('bookingstrackerpresencecountervaluetocount_desc', 'mod_booking'),
+                0,
+                booking::get_possible_presences(true)
+            )
+        );
+
+        // PRO feature: Teacher settings.
         $settings->add(
             new admin_setting_heading(
                 'teachersettings',
@@ -546,22 +630,13 @@ if ($ADMIN->fulltree) {
             )
         );
 
-        $teacherroleid = [0 => ''];
-        $allrolenames = role_get_names();
-        $assignableroles = get_roles_for_contextlevels(CONTEXT_COURSE);
-        foreach ($allrolenames as $value) {
-            if (in_array($value->id, $assignableroles)) {
-                $teacherroleid[$value->id] = $value->localname;
-            }
-        }
-
         $settings->add(
             new admin_setting_configselect(
                 'booking/definedteacherrole',
                 get_string('definedteacherrole', 'mod_booking'),
                 get_string('definedteacherrole_desc', 'mod_booking'),
-                'definedteacherrole',
-                $teacherroleid
+                0,
+                $courseroleids
             )
         );
     } else {
@@ -975,6 +1050,15 @@ if ($ADMIN->fulltree) {
             get_string('pricecategoryfallback_desc', 'mod_booking'),
             0,
             $defaultbehaviours
+        )
+    );
+
+    $settings->add(
+        new admin_setting_configcheckbox(
+            'booking/pricecategorychoosehighest',
+            get_string('pricecategorychoosehighest', 'mod_booking'),
+            get_string('pricecategorychoosehighest_desc', 'mod_booking'),
+            0
         )
     );
 
@@ -1528,6 +1612,7 @@ if ($ADMIN->fulltree) {
             'showall' => get_string('showallbookingoptions', 'booking'),
             'mybooking' => get_string('showmybookingsonly', 'booking'),
             'myoptions' => get_string('optionsiteach', 'booking'),
+            'optionsiamresponsiblefor' => get_string('optionsiamresponsiblefor', 'mod_booking'),
             'showactive' => get_string('activebookingoptions', 'booking'),
             'myinstitution' => get_string('myinstitution', 'booking'),
             'showvisible' => get_string('visibleoptions', 'booking'),

@@ -19,6 +19,7 @@ namespace mod_booking;
 use context_course;
 use context_module;
 use html_writer;
+use mod_booking\bo_availability\conditions\customform;
 use mod_booking\event\enrollink_triggered;
 use moodle_url;
 use stdClass;
@@ -35,6 +36,9 @@ require_once($CFG->dirroot.'/calendar/lib.php');
  */
 class enrollink {
 
+    /** @var static $instances  */
+    private static $instances = [];
+
     /** @var object $bundle  */
     public $bundle = [];
 
@@ -47,29 +51,49 @@ class enrollink {
     /** @var string erlid  */
     public $erlid = 0;
 
-    /** @var string errorinfo  */
-    public $errorinfo = "";
+    /** @var int errorinfo  */
+    public $errorinfo = 0;
 
 
     /**
-     * Construct and set values.
+     * Get the singleton instance.
      *
      * @param string $erlid
-     *
+     * @return enrollink
      */
-    public function __construct(string $erlid) {
+    public static function get_instance(string $erlid): ?self {
+        if (!isset(self::$instances[$erlid])) {
+            self::$instances[$erlid] = new self($erlid);
+        }
+        return self::$instances[$erlid];
+    }
+
+    /**
+     * Private constructor to prevent direct instantiation.
+     *
+     * @param string $erlid
+     */
+    private function __construct(string $erlid) {
         $this->set_values($erlid);
+    }
+
+    /**
+     * Destroys the singleton entirely.
+     *
+     * @return bool
+     */
+    public static function destroy_instances() {
+        self::$instances = [];
+        return true;
     }
 
     /**
      * Set values.
      *
      * @param string $erlid
-     *
-     * @return [type]
-     *
+     * @return void
      */
-    public function set_values(string $erlid) {
+    private function set_values(string $erlid): void {
         global $DB;
 
         $this->erlid = $erlid;
@@ -79,9 +103,8 @@ class enrollink {
             $this->freeseats = $this->bundle->places - count($this->itemsconsumed);
         } catch (\Exception $e) {
             $this->erlid = false;
-            $this->errorinfo = 'invalidenrollink';
+            $this->errorinfo = MOD_BOOKING_AUTOENROL_STATUS_LINK_NOT_VALID;
         }
-
     }
 
     /**
@@ -115,51 +138,70 @@ class enrollink {
      *
      * @param int $userid
      *
-     * @return string
+     * @return int
      *
      */
-    public function enrol_user(int $userid): string {
+    public function enrol_user(int $userid): int {
 
+        if (!empty($block = $this->enrolment_blocking())) {
+            return $block;
+        }
+
+        if (isguestuser()) {
+            return MOD_BOOKING_AUTOENROL_STATUS_LOGGED_IN_AS_GUEST;
+        }
         $context = context_course::instance($this->bundle->courseid);
-        // Make sure, the user isn't booked yet.
+        $courseenrolmentstatus = MOD_BOOKING_AUTOENROL_STATUS_EXCEPTION;
+        // 1. Enrolling to the linked course.
+        // Make sure, the user isn't booked to the course yet.
         if (
             is_enrolled($context, $userid)
         ) {
-            return "alreadyenrolled";
+            return MOD_BOOKING_AUTOENROL_STATUS_ALREADY_ENROLLED;
         }
 
         $cmid = $this->get_bo_contextid();
-        $bo = new booking_option($cmid, $this->bundle->optionid);
-
+        $bo = singleton_service::get_instance_of_booking_option($cmid, $this->bundle->optionid);
         try {
-            $bo->enrol_user(
-                $userid,
-                false,
-                0,
-                false,
-                $this->bundle->courseid,
-                true
+            $user = singleton_service::get_instance_of_user($userid);
+            $booking = singleton_service::get_instance_of_booking_by_cmid($cmid);
+            // Enrol to bookingoption and reduce places in bookinganswer.
+            $bo->user_submit_response(
+                $user,
+                $booking->id,
+                1,
+                MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL,
+                MOD_BOOKING_VERIFIED,
+                $this->erlid
             );
-            $this->add_consumed_item($userid);
-            return "enrolled";
+            // Change answer if user was enrolled only to waitinglist.
+            if ($this->enrolmentstatus_waitinglist($bo->settings)) {
+                $courseenrolmentstatus = MOD_BOOKING_AUTOENROL_STATUS_WAITINGLIST;
+            } else {
+                $courseenrolmentstatus = MOD_BOOKING_AUTOENROL_STATUS_SUCCESS;
+            }
+
         } catch (\Exception $e) {
-            return "enrolmentexception";
+            $courseenrolmentstatus = MOD_BOOKING_AUTOENROL_STATUS_EXCEPTION;
         }
+        return $courseenrolmentstatus;
     }
 
     /**
-     * [Description for update_consumed_items]
+     * Add consumed item to enrollink table and update bookinganswer.
+     * If the user is the initial user who bought the bundle, the consumed item should not be deduced from bookinganswer places.
      *
      * @param int $userid
+     * @param bool $initialuser
      *
      * @return bool
      *
      */
-    private function add_consumed_item(int $userid): bool {
+    public function add_consumed_item(int $userid, bool $initialuser = false): bool {
         global $DB;
         if (
             empty($this->free_places_left())
-            ) {
+        ) {
             return false;
         }
 
@@ -185,7 +227,43 @@ class enrollink {
         $this->itemsconsumed[$id] = $data;
         $this->freeseats--;
 
+        if (!$initialuser) {
+            $this->update_bookinganswer($this->erlid);
+        }
         return true;
+    }
+
+    /**
+     * Update bookingsanswer to make sure the place reserved from bundle is deduced...
+     * From the bookinganswer that is reserving the bundle.
+     *
+     * @param string $erlid
+     *
+     * @return bool
+     *
+     */
+    private function update_bookinganswer(string $erlid): bool {
+        global $DB;
+
+        $sql = "
+            SELECT ba.*
+            FROM {booking_answers} ba
+            JOIN {booking_enrollink_bundles} beb ON beb.baid = ba.id
+            WHERE beb.erlid = :erlid
+        ";
+        $params = ['erlid' => $erlid];
+        $record = $DB->get_record_sql($sql, $params);
+
+        if (
+            $record
+            && $record->places > 0
+        ) {
+            $record->places -= 1;
+            $DB->update_record('booking_answers', $record);
+            return true;
+        } else {
+            return false;
+        }
     }
 
     /**
@@ -217,23 +295,23 @@ class enrollink {
      * Check if enrolment is blocked.
      *
      *
-     * @return string
+     * @return int
      *
      */
-    public function enrolment_blocking(): string {
+    public function enrolment_blocking(): int {
 
         if (!empty($this->errorinfo)) {
             return $this->errorinfo;
         }
 
         if (!$this->erlid) {
-            return 'invalidenrollink';
+            return MOD_BOOKING_AUTOENROL_STATUS_LINK_NOT_VALID;
         }
 
         if (empty($this->free_places_left())) {
-            return "nomoreseats";
+            return MOD_BOOKING_AUTOENROL_STATUS_NO_MORE_SEATS;
         }
-        return "";
+        return 0;
     }
 
 
@@ -305,8 +383,12 @@ class enrollink {
         if (empty($key)) {
             return false;
         };
-
+        $freeplaces = false;
         $places = $answer->$key;
+        if ($places > 0) {
+            $freeplaces = true;
+        }
+
         // Update table.
         $data = new stdClass();
         $data->courseid = $settings->courseid;
@@ -314,38 +396,51 @@ class enrollink {
         $data->usermodified = $USER->id;
         $data->timecreated = time();
         $data->timemodified = $data->timecreated;
-        $data->places = $places;
+        $data->places = (string) $places;
         $data->erlid = md5(random_string());
         $data->baid = $baid;
         $data->optionid = $optionid;
         $id = $DB->insert_record('booking_enrollink_bundles', $data);
 
-        $bas = singleton_service::get_instance_of_booking_answers($settings);
-        $barecord = $bas->answers[$baid];
+        // Check if user who bought was enrolled fo the course. If so, add item to db.
+        if (
+            isset($bookinganswer->answers[$baid])
+            && self::enroluseraction_allows_enrolment($bookinganswer, $baid)
+        ) {
+            $el = self::get_instance($data->erlid);
+            $el->add_consumed_item($userid, true);
+            if ($places == 1) {
+                $freeplaces = false;
+            }
+        }
 
-        // Trigger event.
-        $event = enrollink_triggered::create([
-            'objectid' => $optionid, // Always needs to be the optionid, to make sure rules are applied correctly.
-            'context' => \context_module::instance($settings->cmid),
-            'userid' => $USER->id, // The user who triggered the event.
-            'relateduserid' => $userid, // Affected user.
-            'other' => [
-                'places' => $places,
-                'optionid' => $optionid,
-                'courseid' => $settings->courseid,
-                'erlid' => $data->erlid, // The hash of this enrollink bundle.
-                'bundleid' => $id, // The hash of this enrollink bundle.
-                'json' => $barecord->json,
-            ],
-        ]);
-        $event->trigger();
+        if ($freeplaces) {
+            $bas = singleton_service::get_instance_of_booking_answers($settings);
+            $barecord = $bas->answers[$baid];
 
+            // Trigger event.
+            $event = enrollink_triggered::create([
+                'objectid' => $optionid, // Always needs to be the optionid, to make sure rules are applied correctly.
+                'context' => \context_module::instance($settings->cmid),
+                'userid' => $USER->id, // The user who triggered the event.
+                'relateduserid' => $userid, // Affected user.
+                'other' => [
+                    'places' => $places,
+                    'optionid' => $optionid,
+                    'courseid' => $settings->courseid,
+                    'erlid' => $data->erlid, // The hash of this enrollink bundle.
+                    'bundleid' => $id, // The hash of this enrollink bundle.
+                    'json' => $barecord->json,
+                ],
+            ]);
+            $event->trigger();
+        }
         return true;
     }
 
     /**
      * Check if enrolusersaction from customform applies.
-     * If so, return key of string in bookinganswer. Otherwise return empty stirng.
+     * If so, return key of string in bookinganswer. Otherwise return empty string.
      *
      * @param object $answer
      *
@@ -364,5 +459,85 @@ class enrollink {
         return "";
     }
 
+    /**
+     * Check if this is a enrolbotaction and if so, check if user actually should be enrolled.
+     *
+     * @param object $bookinganswer
+     * @param int $baid
+     *
+     * @return bool
+     *
+     */
+    public static function enroluseraction_allows_enrolment(
+        object $bookinganswer,
+        int $baid
+    ): bool {
 
+        $answer = $bookinganswer->answers[$baid];
+        if (!$answer->json) {
+            return true;
+        }
+        $data = json_decode($answer->json);
+        if (!isset($data->condition_customform)) {
+            return true;
+        }
+        foreach ($data->condition_customform as $key => $value) {
+            if (
+                strpos($key, 'customform_enroluserwhobookedcheckbox_enrolusersaction') === 0 &&
+                empty($value)
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Check if users should be enroled to waitinglist or booked directly.
+     *
+     * @param booking_option_settings $settings
+     *
+     * @return bool
+     *
+     */
+    public static function enrolmentstatus_waitinglist(booking_option_settings $settings): bool {
+
+        $formsarray = customform::return_formelements($settings);
+
+        foreach ($formsarray as $forms) {
+            if (
+                $forms->formtype == 'enrolusersaction'
+                && !empty($forms->enroluserstowaitinglist)
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Check if it's the initial answer to enrol users.
+     *
+     * @param object $answer
+     *
+     * @return bool
+     *
+     */
+    public static function is_initial_answer(
+        object $answer
+    ): bool {
+
+        if (!$answer->json) {
+            return false;
+        }
+        $data = json_decode($answer->json);
+        foreach ($data->condition_customform as $key => $value) {
+            if (
+                strpos($key, 'customform_enroluserwhobookedcheckbox_enrolusersaction') === 0
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

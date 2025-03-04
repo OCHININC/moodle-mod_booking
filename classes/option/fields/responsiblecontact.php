@@ -39,7 +39,6 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class responsiblecontact extends field_base {
-
     /**
      * This ID is used for sorting execution.
      * @var int
@@ -52,7 +51,7 @@ class responsiblecontact extends field_base {
      * Some can be saved only post save (when they need the option id).
      * @var int
      */
-    public static $save = MOD_BOOKING_EXECUTION_NORMAL;
+    public static $save = MOD_BOOKING_EXECUTION_POSTSAVE;
 
     /**
      * This identifies the header under which this particular field should be displayed.
@@ -91,7 +90,8 @@ class responsiblecontact extends field_base {
         stdClass &$formdata,
         stdClass &$newoption,
         int $updateparam,
-        $returnvalue = null): array {
+        $returnvalue = null
+    ): array {
 
         parent::prepare_save_field($formdata, $newoption, $updateparam, 0);
 
@@ -99,7 +99,6 @@ class responsiblecontact extends field_base {
         $mockclass = new stdClass();
         $mockclass->id = $formdata->id ?? 1;
         $changes = $instance->check_for_changes($formdata, $instance, $mockclass);
-
         return $changes;
     }
 
@@ -120,15 +119,18 @@ class responsiblecontact extends field_base {
         $applyheader = true
     ) {
 
-        $mform->addElement('header', 'responsiblecontactheader',
-            '<i class="fa fa-fw fa-user" aria-hidden="true"></i>&nbsp;' . get_string('responsiblecontact', 'mod_booking'));
+        $mform->addElement(
+            'header',
+            'responsiblecontactheader',
+            '<i class="fa fa-fw fa-user" aria-hidden="true"></i>&nbsp;' . get_string('responsiblecontact', 'mod_booking')
+        );
 
         // Responsible contact person - autocomplete.
         $options = [
             'ajax' => 'mod_booking/form_users_selector',
             'multiple' => false,
             'noselectionstring' => get_string('choose...', 'mod_booking'),
-            'valuehtmlcallback' => function($value) {
+            'valuehtmlcallback' => function ($value) {
                 global $OUTPUT;
                 if (empty($value)) {
                     return get_string('choose...', 'mod_booking');
@@ -144,13 +146,19 @@ class responsiblecontact extends field_base {
                     'lastname' => $user->lastname,
                 ];
                 return $OUTPUT->render_from_template(
-                        'mod_booking/form-user-selector-suggestion', $details);
+                    'mod_booking/form-user-selector-suggestion',
+                    $details
+                );
             },
         ];
-        $mform->addElement('autocomplete', 'responsiblecontact',
-            get_string('responsiblecontact', 'mod_booking'), [], $options);
+        $mform->addElement(
+            'autocomplete',
+            'responsiblecontact',
+            get_string('responsiblecontact', 'mod_booking'),
+            [],
+            $options
+        );
         $mform->addHelpButton('responsiblecontact', 'responsiblecontact', 'mod_booking');
-
     }
 
     /**
@@ -174,6 +182,48 @@ class responsiblecontact extends field_base {
                 $data->responsiblecontact = $userids[0] ?? [];
             } else {
                 $data->responsiblecontact = $settings->responsiblecontact ?? [];
+            }
+        }
+    }
+
+    /**
+     * Save data
+     * @param stdClass $formdata
+     * @param stdClass $option
+     * @return void
+     * @throws \dml_exception
+     */
+    public static function save_data(stdClass &$formdata, stdClass &$option) {
+
+        $cmid = $formdata->cmid;
+        $optionid = $option->id;
+
+        if (!empty($cmid) && !empty($optionid)) {
+            // Check if we need to enrol responsible contact users.
+            if (get_config('booking', 'responsiblecontactenroltocourse')) {
+                $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+                $bookingoption = singleton_service::get_instance_of_booking_option($cmid, $optionid);
+
+                // Now get the role id for the responsible contact.
+                $userid = (int) $formdata->responsiblecontact;
+                if (!empty($userid)) {
+                    $roleid = (int) get_config('booking', 'definedresponsiblecontactrole');
+                    if (empty($roleid)) {
+                        $roleid = 0;
+                    }
+                    $courseid = $settings->courseid;
+                    if (!empty($courseid)) {
+                        $bookingoption->enrol_user($userid, false, $roleid, false, $courseid, true);
+                    }
+                }
+
+                // Only when the responsible contact changes, we need to make sure, that the old responsible contact is unenrolled.
+                if (
+                    !empty($settings->responsiblecontact)
+                    && ($formdata->responsiblecontact != $settings->responsiblecontact)
+                ) {
+                    $bookingoption->unenrol_user((int)$settings->responsiblecontact);
+                }
             }
         }
     }

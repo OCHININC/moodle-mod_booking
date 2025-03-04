@@ -27,8 +27,14 @@
 
 namespace mod_booking\output;
 
+use context_module;
+use context_course;
+use context_system;
 use mod_booking\booking_answers;
+use mod_booking\singleton_service;
 use mod_booking\table\manageusers_table;
+use moodle_exception;
+use moodle_url;
 use renderer_base;
 use renderable;
 use templatable;
@@ -69,7 +75,7 @@ class booked_users implements renderable, templatable {
      * @param bool $showreserved
      * @param bool $showtonotify
      * @param bool $showdeleted
-     *
+     * @param int $cmid optional course module id of booking instance
      */
     public function __construct(
         string $scope = 'system',
@@ -78,59 +84,129 @@ class booked_users implements renderable, templatable {
         bool $showwaiting = false,
         bool $showreserved = false,
         bool $showtonotify = false,
-        bool $showdeleted = false
+        bool $showdeleted = false,
+        int $cmid = 0
     ) {
-        // Columns.
-        $bookeduserscols = ['name', 'action_delete'];
-        $waitinglistcols = ['name', 'action_confirm_delete'];
-        $reserveduserscols = ['name', 'action_delete'];
-        $userstonotifycols = ['name', 'action_delete'];
-        $deleteduserscols = ['name', 'timemodified'];
+        switch ($scope) {
+            case 'optiondate':
+                $bookingsettings = singleton_service::get_instance_of_booking_settings_by_cmid($cmid);
+                $enablepresence = $bookingsettings->enablepresence;
 
-        // Headers.
-        $bookedusersheaders = [get_string('user', 'core'), get_string('delete', 'mod_booking')];
-        $waitinglistheaders = [
-            get_string('user', 'core'),
-            get_string('delete', 'mod_booking'),
-        ];
-        $reservedusersheaders = [get_string('user', 'core'), get_string('delete', 'mod_booking')];
-        $userstonotifyheaders = [get_string('user', 'core'), get_string('delete', 'mod_booking')];
-        $deletedusersheaders = [get_string('user', 'core'), get_string('date')];
+                // For optiondates we only show booked users.
+                // Also, we have no delete action but presence tracking.
+                $bookeduserscols[] = 'lastname';
+                $bookedusersheaders[] = get_string('lastname', 'core');
+                $bookeduserscols[] = 'firstname';
+                $bookedusersheaders[] = get_string('firstname', 'core');
+                $bookeduserscols[] = 'email';
+                $bookedusersheaders[] = get_string('email', 'core');
+                if ($enablepresence) {
+                    $bookeduserscols[] = 'status';
+                    $bookedusersheaders[] = get_string('presence', 'mod_booking');
+                }
+                $bookeduserscols[] = 'notes';
+                $bookedusersheaders[] = get_string('notes', 'mod_booking');
+                $bookeduserscols[] = 'actions';
+                $bookedusersheaders[] = get_string('actions', 'mod_booking');
+                break;
+            case 'option':
+                // Define columns and headers for the tables.
+                $bookeduserscols[] = 'lastname';
+                $bookedusersheaders[] = get_string('lastname', 'core');
+                $bookeduserscols[] = 'firstname';
+                $bookedusersheaders[] = get_string('firstname', 'core');
+                $bookeduserscols[] = 'email';
+                if (get_config('booking', 'bookingstrackerpresencecounter')) {
+                    $bookeduserscols[] = 'presencecount';
+                }
+                $bookeduserscols[] = 'action_delete';
 
-        // If the scope contains more than one option...
-        // ...then we have to add an option column!
-        if ($scope != 'option') {
-            array_unshift($bookeduserscols, 'option');
-            array_unshift($waitinglistcols, 'option');
-            array_unshift($reserveduserscols, 'option');
-            array_unshift($userstonotifycols, 'option');
-            array_unshift($deleteduserscols, 'option');
+                $waitinglistcols = ['name', 'action_confirm_delete'];
+                $reserveduserscols = ['name', 'action_delete'];
+                $userstonotifycols = ['name', 'action_delete'];
+                $deleteduserscols = ['name', 'timemodified'];
 
-            array_unshift($bookedusersheaders, get_string('bookingoption', 'mod_booking'));
-            array_unshift($waitinglistheaders, get_string('bookingoption', 'mod_booking'));
-            array_unshift($reservedusersheaders, get_string('bookingoption', 'mod_booking'));
-            array_unshift($userstonotifyheaders, get_string('bookingoption', 'mod_booking'));
-            array_unshift($deletedusersheaders, get_string('bookingoption', 'mod_booking'));
-        } else {
-            // We are in 'option' scope.
-            if (get_config('booking', 'waitinglistshowplaceonwaitinglist')) {
-                array_unshift($waitinglistcols, 'rank');
-                array_unshift($waitinglistheaders, get_string('rank', 'mod_booking'));
-            }
+                $bookedusersheaders[] = get_string('user', 'core');
+                if (get_config('booking', 'bookingstrackerpresencecounter')) {
+                    $bookedusersheaders[] = get_string('presencecount', 'mod_booking');
+                }
+                $bookedusersheaders[] = get_string('delete', 'mod_booking');
+
+                $waitinglistheaders = [
+                    get_string('user', 'core'),
+                    get_string('delete', 'mod_booking'),
+                ];
+                $reservedusersheaders = [
+                    get_string('user', 'core'),
+                    get_string('delete', 'mod_booking'),
+                ];
+                $userstonotifyheaders = [
+                    get_string('user', 'core'),
+                    get_string('delete', 'mod_booking'),
+                ];
+                $deletedusersheaders = [
+                    get_string('user', 'core'),
+                    get_string('date'),
+                ];
+
+                if (get_config('booking', 'waitinglistshowplaceonwaitinglist')) {
+                    array_unshift($waitinglistcols, 'rank');
+                    array_unshift($waitinglistheaders, get_string('rank', 'mod_booking'));
+                }
+                break;
+            case 'system':
+            case 'course':
+            case 'instance':
+            default:
+                // Define columns and headers for the tables.
+                $bookeduserscols = [];
+                $waitinglistcols = [];
+                $reserveduserscols = [];
+                $userstonotifycols = [];
+                $deleteduserscols = [];
+                $bookedusersheaders = [];
+                $waitinglistheaders = [];
+                $reservedusersheaders = [];
+                $userstonotifyheaders = [];
+                $deletedusersheaders = [];
+
+                $bookeduserscols[] = 'option';
+                $bookeduserscols[] = 'answerscount';
+                if (get_config('booking', 'bookingstrackerpresencecounter')) {
+                    $bookeduserscols[] = 'presencecount';
+                }
+
+                $waitinglistcols[] = 'option';
+                $waitinglistcols[] = 'answerscount';
+
+                $reserveduserscols[] = 'option';
+                $reserveduserscols[] = 'answerscount';
+
+                $userstonotifycols[] = 'option';
+                $userstonotifycols[] = 'answerscount';
+
+                $deleteduserscols[] = 'option';
+                $deleteduserscols[] = 'answerscount';
+
+                $bookedusersheaders[] = get_string('bookingoption', 'mod_booking');
+                $bookedusersheaders[] = get_string('answerscount', 'mod_booking');
+                if (get_config('booking', 'bookingstrackerpresencecounter')) {
+                    $bookedusersheaders[] = get_string('presencecount', 'mod_booking');
+                }
+
+                $waitinglistheaders[] = get_string('bookingoption', 'mod_booking');
+                $waitinglistheaders[] = get_string('answerscount', 'mod_booking');
+
+                $reservedusersheaders[] = get_string('bookingoption', 'mod_booking');
+                $reservedusersheaders[] = get_string('answerscount', 'mod_booking');
+
+                $userstonotifyheaders[] = get_string('bookingoption', 'mod_booking');
+                $userstonotifyheaders[] = get_string('answerscount', 'mod_booking');
+
+                $deletedusersheaders[] = get_string('bookingoption', 'mod_booking');
+                $deletedusersheaders[] = get_string('answerscount', 'mod_booking');
+                break;
         }
-
-        // We currently only support checkboxes in option scope.
-        // We might change this in future versions.
-        // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
-        /* if ($scope == 'option') {
-            // Checkboxes are currently only supported for booked users and users on waiting list.
-            // We might change this in future versions.
-            array_unshift($bookeduserscols, 'checkbox');
-            array_unshift($waitinglistcols, 'checkbox');
-            $headercheckboxhtml = '<input type="checkbox" id="usercheckboxall" name="selectall" value="0" />';
-            array_unshift($bookedusersheaders, $headercheckboxhtml);
-            array_unshift($waitinglistheaders, $headercheckboxhtml);
-        } */
 
         $this->bookedusers = $showbooked ?
             $this->render_users_table(
@@ -142,44 +218,47 @@ class booked_users implements renderable, templatable {
                 $bookedusersheaders
             ) : null;
 
-        $this->waitinglist = $showwaiting ? $this->render_users_table(
-            $scope,
-            $scopeid,
-            MOD_BOOKING_STATUSPARAM_WAITINGLIST,
-            'waitinglist',
-            $waitinglistcols,
-            $waitinglistheaders,
-            true
-        ) : null;
+        // For optiondate scope, we only show booked users.
+        if ($scope != 'optiondate') {
+            $this->waitinglist = $showwaiting ? $this->render_users_table(
+                $scope,
+                $scopeid,
+                MOD_BOOKING_STATUSPARAM_WAITINGLIST,
+                'waitinglist',
+                $waitinglistcols,
+                $waitinglistheaders,
+                true
+            ) : null;
 
-        $this->reservedusers = $showreserved ? $this->render_users_table(
-            $scope,
-            $scopeid,
-            MOD_BOOKING_STATUSPARAM_RESERVED,
-            'reserved',
-            $reserveduserscols,
-            $reservedusersheaders,
-        ) : null;
+            $this->reservedusers = $showreserved ? $this->render_users_table(
+                $scope,
+                $scopeid,
+                MOD_BOOKING_STATUSPARAM_RESERVED,
+                'reserved',
+                $reserveduserscols,
+                $reservedusersheaders,
+            ) : null;
 
-        $this->userstonotify = $showtonotify ? $this->render_users_table(
-            $scope,
-            $scopeid,
-            MOD_BOOKING_STATUSPARAM_NOTIFYMELIST,
-            'notifymelist',
-            $userstonotifycols,
-            $userstonotifyheaders
-        ) : null;
+            $this->userstonotify = $showtonotify ? $this->render_users_table(
+                $scope,
+                $scopeid,
+                MOD_BOOKING_STATUSPARAM_NOTIFYMELIST,
+                'notifymelist',
+                $userstonotifycols,
+                $userstonotifyheaders
+            ) : null;
 
-        $this->deletedusers = $showdeleted ? $this->render_users_table(
-            $scope,
-            $scopeid,
-            MOD_BOOKING_STATUSPARAM_DELETED,
-            'deleted',
-            $deleteduserscols,
-            $deletedusersheaders,
-            false,
-            true
-        ) : null;
+            $this->deletedusers = $showdeleted ? $this->render_users_table(
+                $scope,
+                $scopeid,
+                MOD_BOOKING_STATUSPARAM_DELETED,
+                'deleted',
+                $deleteduserscols,
+                $deletedusersheaders,
+                false,
+                true
+            ) : null;
+        }
     }
 
     /**
@@ -210,6 +289,8 @@ class booked_users implements renderable, templatable {
         $tablename = "{$tablenameprefix}_{$scope}_{$scopeid}";
         $table = new manageusers_table($tablename);
 
+        // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+        // Todo: $table->define_baseurl() ...
         $table->define_cache('mod_booking', "bookedusertable");
         $table->define_columns($columns);
         $table->define_headers($headers);
@@ -223,6 +304,26 @@ class booked_users implements renderable, templatable {
         }
 
         $table->set_sql($fields, $from, $where, $params);
+
+        // Table configurations for different scopes.
+        if (self::has_capability_in_scope($scope, $scopeid, 'mod/booking:updatebooking')) {
+            $baseurl = new moodle_url(
+                '/mod/booking/download_report2.php',
+                [
+                    'scope' => $scope,
+                    'statusparam' => $statusparam,
+                ]
+            );
+            $table->define_baseurl($baseurl);
+
+            // We currently support download for booked users only.
+            if ($statusparam == 0) {
+                $table->showdownloadbutton = true;
+                if (in_array($scope, ['option', 'optiondate'])) {
+                    $table->showdownloadbuttonatbottom = true;
+                }
+            }
+        }
 
         // Checkboxes are currently only supported in option scope.
         if ($scope === 'option') {
@@ -247,7 +348,6 @@ class booked_users implements renderable, templatable {
                     'bodystring' => 'deletecheckedanswersbody',
                     // Localized title to be displayed as title in dynamic form (formname).
                     // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
-                    /* 'title' => get_string('title'), */
                     'submitbuttonstring' => 'delete',
                     'component' => 'mod_booking',
                     // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
@@ -255,7 +355,6 @@ class booked_users implements renderable, templatable {
                 ],
             ];
         }
-
         $html = $table->outhtml(20, false);
         return count($table->rawdata) > 0 ? $html : null;
     }
@@ -267,11 +366,38 @@ class booked_users implements renderable, templatable {
      */
     public function export_for_template(renderer_base $output): array {
         return array_filter([
-            'bookedusers' => $this->bookedusers,
-            'waitinglist' => $this->waitinglist,
-            'reservedusers' => $this->reservedusers,
-            'userstonotify' => $this->userstonotify,
-            'deletedusers' => $this->deletedusers,
+            'bookedusers' => $this->bookedusers ?? null,
+            'waitinglist' => $this->waitinglist ?? null,
+            'reservedusers' => $this->reservedusers ?? null,
+            'userstonotify' => $this->userstonotify ?? null,
+            'deletedusers' => $this->deletedusers ?? null,
         ]);
+    }
+
+    /**
+     * Helper function to check capability for logged-in user in provided scope.
+     * @param string $scope
+     * @param int $scopeid
+     * @param string $capability
+     */
+    public static function has_capability_in_scope($scope, $scopeid, $capability) {
+        switch ($scope) {
+            case 'optiondate':
+                global $DB;
+                $optionid = $DB->get_field('booking_optiondates', 'optionid', ['id' => $scopeid]);
+                $cmid = singleton_service::get_instance_of_booking_option_settings($optionid)->cmid;
+                return has_capability($capability, context_module::instance($cmid));
+            case 'option':
+                $cmid = singleton_service::get_instance_of_booking_option_settings($scopeid)->cmid;
+                return has_capability($capability, context_module::instance($cmid));
+            case 'instance':
+                return has_capability($capability, context_module::instance($scopeid));
+            case 'course':
+                return has_capability($capability, context_course::instance($scopeid));
+            case 'system':
+                return has_capability($capability, context_system::instance());
+            default:
+                throw new moodle_exception('Invalid scope for booked users table.');
+        }
     }
 }

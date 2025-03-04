@@ -174,23 +174,23 @@ final class backup_restore_test extends advanced_testcase {
         $this->assertCount(2, $options2);
         $option20 = array_shift($options2);
         $this->assertEquals($options[0]->text, $option20->text);
-        $this->assertEquals($options[0]->coursestarttime_1, $option20->coursestarttime);
-        $this->assertEquals($options[0]->courseendtime_2, $option20->courseendtime);
+        $this->assertEquals($options[0]->coursestarttime_0, $option20->coursestarttime);
+        $this->assertEquals($options[0]->courseendtime_1, $option20->courseendtime);
         $this->assertEquals($options[0]->customfield_spt1, $option20->spt1);
         $optionsettings = singleton_service::get_instance_of_booking_option_settings($option20->id);
         $sessions = $optionsettings->sessions;
         $this->assertCount(2, $sessions);
         $session1 = array_shift($sessions);
-        $this->assertEquals($options[0]->coursestarttime_1, $session1->coursestarttime);
-        $this->assertEquals($options[0]->courseendtime_1, $session1->courseendtime);
+        $this->assertEquals($options[0]->coursestarttime_0, $session1->coursestarttime);
+        $this->assertEquals($options[0]->courseendtime_0, $session1->courseendtime);
         $session2 = array_shift($sessions);
-        $this->assertEquals($options[0]->coursestarttime_2, $session2->coursestarttime);
-        $this->assertEquals($options[0]->courseendtime_2, $session2->courseendtime);
+        $this->assertEquals($options[0]->coursestarttime_1, $session2->coursestarttime);
+        $this->assertEquals($options[0]->courseendtime_1, $session2->courseendtime);
 
         $option21 = array_shift($options2);
         $this->assertEquals($options[1]->text, $option21->text);
-        $this->assertEquals($options[1]->coursestarttime_1, $option21->coursestarttime);
-        $this->assertEquals($options[1]->courseendtime_1, $option21->courseendtime);
+        $this->assertEquals($options[1]->coursestarttime_0, $option21->coursestarttime);
+        $this->assertEquals($options[1]->courseendtime_0, $option21->courseendtime);
         $this->assertEquals($options[1]->customfield_spt1, $option21->spt1);
         $optionsettings = singleton_service::get_instance_of_booking_option_settings($option21->id);
         $this->assertCount(1, $optionsettings->sessions);
@@ -203,23 +203,23 @@ final class backup_restore_test extends advanced_testcase {
         $this->assertCount(2, $options2);
         $option22 = array_shift($options2);
         $this->assertEquals($options[2]->text, $option22->text);
-        $this->assertEquals($options[2]->coursestarttime_1, $option22->coursestarttime);
-        $this->assertEquals($options[2]->courseendtime_2, $option22->courseendtime);
+        $this->assertEquals($options[2]->coursestarttime_0, $option22->coursestarttime);
+        $this->assertEquals($options[2]->courseendtime_1, $option22->courseendtime);
         $this->assertEquals($options[2]->customfield_spt1, $option22->spt1);
         $optionsettings = singleton_service::get_instance_of_booking_option_settings($option22->id);
         $sessions = $optionsettings->sessions;
         $this->assertCount(2, $sessions);
         $session1 = array_shift($sessions);
-        $this->assertEquals($options[2]->coursestarttime_1, $session1->coursestarttime);
-        $this->assertEquals($options[2]->courseendtime_1, $session1->courseendtime);
+        $this->assertEquals($options[2]->coursestarttime_0, $session1->coursestarttime);
+        $this->assertEquals($options[2]->courseendtime_0, $session1->courseendtime);
         $session2 = array_shift($sessions);
-        $this->assertEquals($options[2]->coursestarttime_2, $session2->coursestarttime);
-        $this->assertEquals($options[2]->courseendtime_2, $session2->courseendtime);
+        $this->assertEquals($options[2]->coursestarttime_1, $session2->coursestarttime);
+        $this->assertEquals($options[2]->courseendtime_1, $session2->courseendtime);
 
         $option23 = array_shift($options2);
         $this->assertEquals($options[3]->text, $option23->text);
-        $this->assertEquals($options[3]->coursestarttime_1, $option23->coursestarttime);
-        $this->assertEquals($options[3]->courseendtime_1, $option23->courseendtime);
+        $this->assertEquals($options[3]->coursestarttime_0, $option23->coursestarttime);
+        $this->assertEquals($options[3]->courseendtime_0, $option23->courseendtime);
         $this->assertEquals($options[3]->customfield_spt1, $option23->spt1);
         $optionsettings = singleton_service::get_instance_of_booking_option_settings($option23->id);
         $this->assertCount(1, $optionsettings->sessions);
@@ -250,7 +250,7 @@ final class backup_restore_test extends advanced_testcase {
                 'tags' => '',
                 'completion' => 2,
                 'cancancelbook' => 0,
-                'showviews' => ['mybooking,myoptions,showall,showactive,myinstitution'],
+                'showviews' => ['mybooking,myoptions,optionsiamresponsiblefor,showall,showactive,myinstitution'],
             ],
             'options' => [
                 // Option 1 with 2 sessions.
@@ -258,24 +258,24 @@ final class backup_restore_test extends advanced_testcase {
                     'text' => 'Test Option 1',
                     'courseid' => 0,
                     'maxanswers' => 2,
+                    'optiondateid_0' => "0",
+                    'daystonotify_0' => "0",
+                    'coursestarttime_0' => strtotime('20 May 2050 15:00'),
+                    'courseendtime_0' => strtotime('20 June 2050 14:00'),
                     'optiondateid_1' => "0",
                     'daystonotify_1' => "0",
-                    'coursestarttime_1' => strtotime('20 May 2050 15:00'),
-                    'courseendtime_1' => strtotime('20 June 2050 14:00'),
-                    'optiondateid_2' => "0",
-                    'daystonotify_2' => "0",
-                    'coursestarttime_2' => strtotime('20 June 2050 15:00'),
-                    'courseendtime_2' => strtotime('20 July 2050 14:00'),
+                    'coursestarttime_1' => strtotime('20 June 2050 15:00'),
+                    'courseendtime_1' => strtotime('20 July 2050 14:00'),
                 ],
                 // Option 2 with single session.
                 1 => [
                     'text' => 'Test Option 2',
                     'courseid' => 0,
                     'maxanswers' => 4,
-                    'optiondateid_1' => "0",
-                    'daystonotify_1' => "0",
-                    'coursestarttime_1' => strtotime('20 July 2050 15:00'),
-                    'courseendtime_1' => strtotime('20 August 2050 14:00'),
+                    'optiondateid_0' => "0",
+                    'daystonotify_0' => "0",
+                    'coursestarttime_0' => strtotime('20 July 2050 15:00'),
+                    'courseendtime_0' => strtotime('20 August 2050 14:00'),
                 ],
             ],
         ];

@@ -45,6 +45,11 @@ $modcontext = context_module::instance($cmid);
 $syscontext = context_system::instance();
 
 // If we have this setting.
+if (!get_config('booking', 'showbookingdetailstoall')) {
+    require_login();
+}
+
+// If we have this setting.
 if (!get_config('booking', 'bookonlyondetailspage')) {
     require_capability('mod/booking:view', $modcontext);
 }
@@ -53,6 +58,24 @@ $PAGE->set_context($syscontext);
 
 $url = new moodle_url('/mod/booking/optionview.php', ['cmid' => $cmid, 'optionid' => $optionid]);
 $PAGE->set_url($url);
+
+// If the user is logged-in, we check if (s)he has accepted the site policy.
+if (isloggedin() && !isguestuser()) {
+    $currentpolicyversionids = \tool_policy\api::get_current_versions_ids();
+    if (!empty($currentpolicyversionids)) {
+        foreach ($currentpolicyversionids as $currentpolicyversionid) {
+            if (\tool_policy\api::get_agreement_optional($currentpolicyversionid)) {
+                continue;
+            }
+            $acceptance = \tool_policy\api::get_user_version_acceptance($USER->id, $currentpolicyversionid);
+            if (empty($acceptance)) {
+                // If the user did not yet accept, we redirect to the policy page.
+                $policyurl = new moodle_url('/admin/tool/policy/index.php', ['returnurl' => $url]);
+                redirect($policyurl);
+            }
+        }
+    }
+}
 
 $booking = singleton_service::get_instance_of_booking_by_cmid($cmid);
 

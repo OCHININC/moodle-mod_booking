@@ -137,6 +137,7 @@ final class shopping_cart_test extends advanced_testcase {
         $record->courseid = $course2->id;
         $record->maxanswers = 2;
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
         // Allow and configure installemnts for option.
         $record->sch_allowinstallment = 1;
         $record->sch_downpayment = 44;
@@ -289,10 +290,11 @@ final class shopping_cart_test extends advanced_testcase {
         $record->courseid = $course->id;
         $record->useprice = 1; // Use price from the default category.
         $record->maxanswers = 3;
-        $record->optiondateid_1 = "0";
-        $record->daystonotify_1 = "0";
-        $record->coursestarttime_1 = strtotime('now + 3 day');
-        $record->courseendtime_1 = strtotime('now + 6 day');
+        $record->optiondateid_0 = "0";
+        $record->daystonotify_0 = "0";
+        $record->coursestarttime_0 = strtotime('now + 3 day');
+        $record->courseendtime_0 = strtotime('now + 6 day');
+        $record->importing = 1;
 
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
@@ -517,6 +519,7 @@ final class shopping_cart_test extends advanced_testcase {
         $record->courseid = $course2->id;
         $record->maxanswers = 4;
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
         // Set test objective setting(s) - custoform "select".
         $record->bo_cond_customform_restrict = 1;
         $record->bo_cond_customform_select_1_1 = 'select';
@@ -651,6 +654,7 @@ final class shopping_cart_test extends advanced_testcase {
         $record->chooseorcreatecourse = 1; // Reqiured.
         $record->courseid = $course2->id;
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
         $record->teachersforoption = $teacher->username;
         $option1 = $plugingenerator->create_option($record);
 
@@ -670,7 +674,7 @@ final class shopping_cart_test extends advanced_testcase {
             $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
         }
 
-        // Validation: consumend quota should be 0 beacuse option not started yet and fixedpercentageafterserviceperiodstart==1.
+        // Validation: consumend quota should be 0 because option not started yet and fixedpercentageafterserviceperiodstart==1.
         foreach ($students as $student) {
             $userhistory = shopping_cart_history::get_most_recent_historyitem(
                 'mod_booking',
@@ -857,6 +861,7 @@ final class shopping_cart_test extends advanced_testcase {
         $record->chooseorcreatecourse = 1; // Reqiured.
         $record->courseid = $course2->id;
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
         $record->teachersforoption = $teacher->username;
         $option1 = $plugingenerator->create_option($record);
 
@@ -1046,6 +1051,7 @@ final class shopping_cart_test extends advanced_testcase {
         $record->chooseorcreatecourse = 1; // Reqiured.
         $record->courseid = $course2->id;
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
         $record->teachersforoption = $teacher->username;
         $option1 = $plugingenerator->create_option($record);
 
@@ -1190,7 +1196,7 @@ final class shopping_cart_test extends advanced_testcase {
                 'tags' => '',
                 'completion' => 2,
                 'cancancelbook' => 0,
-                'showviews' => ['mybooking,myoptions,showall,showactive,myinstitution'],
+                'showviews' => ['mybooking,myoptions,optionsiamresponsiblefor,showall,showactive,myinstitution'],
             ],
             'options' => [
                 // Option 1 with 1 session in remote future.
@@ -1198,48 +1204,48 @@ final class shopping_cart_test extends advanced_testcase {
                     'text' => 'Test Option 1',
                     'courseid' => 0,
                     'maxanswers' => 2,
-                    'optiondateid_1' => "0",
-                    'daystonotify_1' => "0",
-                    'coursestarttime_1' => strtotime('20 May 2050 15:00'),
-                    'courseendtime_1' => strtotime('20 June 2050 14:00'),
+                    'optiondateid_0' => "0",
+                    'daystonotify_0' => "0",
+                    'coursestarttime_0' => strtotime('20 May 2050 15:00'),
+                    'courseendtime_0' => strtotime('20 June 2050 14:00'),
                 ],
                 // Option 2 with 1 session started tomorrow.
                 1 => [
                     'text' => 'Test Option 2',
                     'courseid' => 0,
                     'maxanswers' => 4,
-                    'optiondateid_1' => "0",
-                    'daystonotify_1' => "0",
-                    'coursestarttime_1' => strtotime('now +1 day'),
-                    'courseendtime_1' => strtotime('now +3 day'),
+                    'optiondateid_0' => "0",
+                    'daystonotify_0' => "0",
+                    'coursestarttime_0' => strtotime('now +1 day'),
+                    'courseendtime_0' => strtotime('now +3 day'),
                 ],
                 // Option 3 with 1 ongoing session started yesterday.
                 2 => [
                     'text' => 'Test Option 3',
                     'courseid' => 0,
                     'maxanswers' => 4,
-                    'optiondateid_1' => "0",
-                    'daystonotify_1' => "0",
-                    'coursestarttime_1' => strtotime('now -48 hours'),
-                    'courseendtime_1' => strtotime('now +72 hours'),
+                    'optiondateid_0' => "0",
+                    'daystonotify_0' => "0",
+                    'coursestarttime_0' => strtotime('now -48 hours'),
+                    'courseendtime_0' => strtotime('now +72 hours'),
                 ],
                 // Option 3 with 1 ongoing and 2 past non-overlaping sessions.
                 3 => [
                     'text' => 'Test Option 4',
                     'courseid' => 0,
                     'maxanswers' => 4,
+                    'optiondateid_0' => "0",
+                    'daystonotify_0' => "0",
+                    'coursestarttime_0' => strtotime('now -6 day'),
+                    'courseendtime_0' => strtotime('now -5 day'),
                     'optiondateid_1' => "0",
                     'daystonotify_1' => "0",
-                    'coursestarttime_1' => strtotime('now -6 day'),
-                    'courseendtime_1' => strtotime('now -5 day'),
+                    'coursestarttime_1' => strtotime('now -4 day'),
+                    'courseendtime_1' => strtotime('now -3 day'),
                     'optiondateid_2' => "0",
                     'daystonotify_2' => "0",
-                    'coursestarttime_2' => strtotime('now -4 day'),
-                    'courseendtime_2' => strtotime('now -3 day'),
-                    'optiondateid_3' => "0",
-                    'daystonotify_3' => "0",
-                    'coursestarttime_3' => strtotime('now -48 hours'),
-                    'courseendtime_3' => strtotime('now +72 hours'),
+                    'coursestarttime_2' => strtotime('now -48 hours'),
+                    'courseendtime_2' => strtotime('now +72 hours'),
                 ],
             ],
             'pricecategories' => [

@@ -59,9 +59,7 @@ defined('MOODLE_INTERNAL') || die();
  * @copyright 2023 Wunderbyte GmbH
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class bookingoptions_wbtable extends wunderbyte_table
-{
-
+class bookingoptions_wbtable extends wunderbyte_table {
     /**
      * This function is called for each data row to allow processing of the
      * invisible value. It's called 'invisibleoption' so it does not interfere with
@@ -275,7 +273,6 @@ class bookingoptions_wbtable extends wunderbyte_table
         $booking = singleton_service::get_instance_of_booking_by_cmid($cmid);
 
         if ($booking) {
-
             if (!modechecker::is_ajax_or_webservice_request()) {
                 $returnurl = $PAGE->url->out();
             } else {
@@ -479,7 +476,6 @@ class bookingoptions_wbtable extends wunderbyte_table
             $bookingsettings = singleton_service::get_instance_of_booking_settings_by_cmid($cmid);
             if (!empty($context) && !empty($bookingsettings)) {
                 if ($bookingsettings->ratings > 0) {
-
                     $ratingshtml =
                         "<div>
                         <select class='starrating' id='rate$values->id' data-current-rating='$myrating' data-itemid='$values->id'>
@@ -492,12 +488,8 @@ class bookingoptions_wbtable extends wunderbyte_table
                     </div>";
 
                     if (has_capability('mod/booking:readresponses', $context) || $isteacher) {
-                        $ratingshtml .= get_string('aggregateavg', 'rating') . ' ' . number_format(
-                            (float) $rating,
-                            2,
-                            '.',
-                            ''
-                        ) . " ($ratingcount)";
+                        $ratingshtml .= get_string('aggregateavg', 'rating') . ' ' .
+                            number_format((float) $rating, 2, '.', '') . " ($ratingcount)";
                     }
                 }
             }
@@ -575,7 +567,6 @@ class bookingoptions_wbtable extends wunderbyte_table
         $settings = singleton_service::get_instance_of_booking_option_settings($values->id, $values);
 
         if (isset($settings->entity) && (count($settings->entity) > 0)) {
-
             $url = new moodle_url('/local/entities/view.php', ['id' => $settings->entity['id']]);
             // Full name of the entity (NOT the shortname).
 
@@ -683,10 +674,14 @@ class bookingoptions_wbtable extends wunderbyte_table
             return '';
         }
 
-        if (!empty($settings->courseid) && (
-            $status == MOD_BOOKING_STATUSPARAM_BOOKED ||
-            has_capability('mod/booking:updatebooking', $context) ||
-            $isteacherofthisoption)) {
+        if (
+            !empty($settings->courseid)
+            && (
+                $status == MOD_BOOKING_STATUSPARAM_BOOKED
+                    || has_capability('mod/booking:updatebooking', $context)
+                    || $isteacherofthisoption
+            )
+        ) {
             // The link will be shown to everyone who...
             // ...has booked this option.
             // ...is a teacher of this option.
@@ -962,30 +957,58 @@ class bookingoptions_wbtable extends wunderbyte_table
                     new moodle_url(
                         '/mod/booking/editoptions.php',
                         [
-                            'id' => $cmid,
-                            'optionid' => $optionid,
+                            'id' => $cmid, 'optionid' => $optionid,
                             'returnto' => 'url',
                             'returnurl' => $returnurl,
                         ]
                     ),
                     $OUTPUT->pix_icon('t/editstring', get_string('editbookingoption', 'mod_booking')) .
-                        get_string('editbookingoption', 'mod_booking')
+                    get_string('editbookingoption', 'mod_booking')
                 ) . '</div>';
-
+    
+                $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(
+                    new moodle_url(
+                        '/mod/booking/report.php',
+                        [
+                            'id' => $cmid,
+                            'optionid' => $optionid,
+                        ]
+                    ),
+                    '<i class="icon fa fa-ticket fa-fw" aria-hidden="true"
+                        aria-label="' . get_string('manageresponses', 'mod_booking') .
+                        '" title="' . get_string('manageresponses', 'mod_booking') . '" >
+                    </i>' .
+                    get_string('manageresponses', 'mod_booking')
+                ) . '</div>';
+    
+                if (get_config('booking', 'bookingstracker')) {
+                    $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(
+                        new moodle_url(
+                            '/mod/booking/report2.php',
+                            [
+                                'cmid' => $cmid,
+                                'optionid' => $optionid,
+                            ]
+                        ),
+                        '<i class="icon fa fa-sitemap fa-fw" aria-hidden="true"
+                            aria-label="' . get_string('bookingstracker', 'mod_booking') .
+                            '" title="' . get_string('bookingstracker', 'mod_booking') . '" >
+                        </i>' .
+                        get_string('bookingstracker', 'mod_booking')
+                    ) . '</div>';
+                }
+    
                 // Book other users.
                 if (
                     has_capability('mod/booking:bookforothers', $context) &&
                     (has_capability('mod/booking:subscribeusers', $context) ||
-                        booking_check_if_teacher($values))
+                    booking_check_if_teacher($values))
                 ) {
-
                     $subscribeusersurl = new moodle_url(
                         '/mod/booking/subscribeusers.php',
-                        [
-                            'id' => $cmid,
-                            'optionid' => $optionid,
-                            'returnto' => 'url',
-                            'returnurl' => $returnurl,
+                        ['id' => $cmid, 'optionid' => $optionid,
+                        'returnto' => 'url',
+                        'returnurl' => $returnurl,
                         ]
                     );
                     $ddoptions[] = '<div class="dropdown-item">' .
@@ -995,25 +1018,25 @@ class bookingoptions_wbtable extends wunderbyte_table
                                 'i/users',
                                 get_string('bookotherusers', 'mod_booking')
                             ) .
-                                get_string('bookotherusers', 'mod_booking')
+                            get_string('bookotherusers', 'mod_booking')
                         ) . '</div>';
                 }
-
+    
                 // Create booking option from each option date.
                 $createfromoptiondateurl = new moodle_url(
                     '/mod/booking/editoptions.php',
                     ['id' => $cmid, 'optionid' => $optionid, 'createfromoptiondates' => 1]
                 );
                 $ddoptions[] = '<div class="dropdown-item">' .
-                    html_writer::link(
-                        $createfromoptiondateurl,
-                        $OUTPUT->pix_icon(
-                            'i/withsubcat',
+                        html_writer::link(
+                            $createfromoptiondateurl,
+                            $OUTPUT->pix_icon(
+                                'i/withsubcat',
+                                get_string('createoptionsfromoptiondate', 'mod_booking')
+                            ) .
                             get_string('createoptionsfromoptiondate', 'mod_booking')
-                        ) .
-                            get_string('createoptionsfromoptiondate', 'mod_booking')
-                    ) . '</div>';
-
+                        ) . '</div>';
+    
                 if (get_config('booking', 'teachersallowmailtobookedusers')) {
                     $mailtolink = booking_option::get_mailto_link_for_partipants($optionid);
                     if (!empty($mailtolink)) {
@@ -1022,11 +1045,11 @@ class bookingoptions_wbtable extends wunderbyte_table
                                 't/email',
                                 get_string('sendmailtoallbookedusers', 'mod_booking')
                             ) .
-                                get_string('sendmailtoallbookedusers', 'booking')) .
-                            '</div>';
+                            get_string('sendmailtoallbookedusers', 'booking')) .
+                        '</div>';
                     }
                 }
-
+    
                 // Show link to optiondates-teachers-report (teacher substitutions).
                 $optiondatesteachersmoodleurl = new moodle_url(
                     '/mod/booking/optiondates_teachers_report.php',
@@ -1039,9 +1062,9 @@ class bookingoptions_wbtable extends wunderbyte_table
                             'i/grades',
                             get_string('optiondatesteachersreport', 'mod_booking')
                         ) .
-                            get_string('optiondatesteachersreport', 'mod_booking')
+                        get_string('optiondatesteachersreport', 'mod_booking')
                     ) . '</div>';
-
+    
                 // Show only one option.
                 $onlyoneurl = new moodle_url(
                     '/mod/booking/view.php',
@@ -1054,16 +1077,15 @@ class bookingoptions_wbtable extends wunderbyte_table
                             'i/publish',
                             get_string('onlythisbookingoption', 'mod_booking')
                         ) .
-                            get_string('onlythisbookingoption', 'mod_booking')
+                        get_string('onlythisbookingoption', 'mod_booking')
                     ) . '</div>';
-
+    
                 if ($canupdate) {
-
                     // Cancel booking options.
                     // Find out if the booking option has a price or not.
                     $optioninfo = $settings->return_booking_option_information();
                     $optionhasprice = empty($optioninfo['price']) ? false : true;
-
+    
                     if ($optionhasprice && class_exists('local_shopping_cart\shopping_cart')) {
                         // The option costs something and shopping cart is installed:
                         // We have to cancel the shopping-cart way!
@@ -1072,16 +1094,16 @@ class bookingoptions_wbtable extends wunderbyte_table
                             $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(
                                 '#',
                                 $OUTPUT->pix_icon('i/reload', '') .
-                                    get_string('undocancelthisbookingoption', 'mod_booking'),
+                                get_string('undocancelthisbookingoption', 'mod_booking'),
                                 [
                                     'class' => 'undocancelallusers',
                                     'data-id' => $optionid,
                                     'data-componentname' => 'mod_booking',
                                     'data-area' => 'option',
                                     'onclick' =>
-                                    "require(['mod_booking/confirm_cancel'], function(init) {
-                                        init.init('" . $optionid . "', '" . $values->status . "');
-                                    });",
+                                        "require(['mod_booking/confirm_cancel'], function(init) {
+                                            init.init('" . $optionid . "', '" . $values->status . "');
+                                        });",
                                 ]
                             ) . "</div>";
                         } else {
@@ -1089,16 +1111,16 @@ class bookingoptions_wbtable extends wunderbyte_table
                             $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(
                                 '#',
                                 $OUTPUT->pix_icon('t/block', '') .
-                                    get_string('cancelallusers', 'mod_booking'),
+                                get_string('cancelallusers', 'mod_booking'),
                                 [
                                     'class' => 'cancelallusers',
                                     'data-id' => $optionid,
                                     'data-componentname' => 'mod_booking',
                                     'data-area' => 'option',
                                     'onclick' =>
-                                    "require(['local_shopping_cart/menu'], function(menu) {
-                                        menu.confirmCancelAllUsersAndSetCreditModal('" . $optionid . "', 'mod_booking', 'option');
-                                    });",
+                                        "require(['local_shopping_cart/menu'], function(menu) {
+                                            menu.confirmCancelAllUsersAndSetCreditModal('" . $optionid . "', 'mod_booking', 'option');
+                                        });",
                                 ]
                             ) . "</div>";
                         }
@@ -1109,12 +1131,12 @@ class bookingoptions_wbtable extends wunderbyte_table
                             $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(
                                 '#',
                                 $OUTPUT->pix_icon('i/reload', '') .
-                                    get_string('undocancelthisbookingoption', 'mod_booking'),
+                                get_string('undocancelthisbookingoption', 'mod_booking'),
                                 [
                                     'onclick' =>
-                                    "require(['mod_booking/confirm_cancel'], function(init) {
-                                        init.init('" . $optionid . "', '" . $values->status . "');
-                                    });",
+                                        "require(['mod_booking/confirm_cancel'], function(init) {
+                                            init.init('" . $optionid . "', '" . $values->status . "');
+                                        });",
                                 ]
                             ) . "</div>";
                         } else {
@@ -1122,52 +1144,56 @@ class bookingoptions_wbtable extends wunderbyte_table
                             $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(
                                 '#',
                                 $OUTPUT->pix_icon('t/block', '') .
-                                    get_string('cancelthisbookingoption', 'mod_booking'),
+                                get_string('cancelthisbookingoption', 'mod_booking'),
                                 [
                                     'onclick' =>
-                                    "require(['mod_booking/confirm_cancel'], function(init) {
-                                        init.init('" . $optionid . "', '" . $values->status . "');
-                                    });",
+                                        "require(['mod_booking/confirm_cancel'], function(init) {
+                                            init.init('" . $optionid . "', '" . $values->status . "');
+                                        });",
                                 ]
                             ) . "</div>";
                         }
                     }
-
-                $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(new moodle_url('/mod/booking/editoptions.php',
+    
+                    $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(new moodle_url(
+                        '/mod/booking/editoptions.php',
                         ['id' => $cmid, 'optionid' => -1, 'copyoptionid' => $optionid,
-                        'returnto' => 'url', 'returnurl' => $returnurl,
-                        ]), $OUTPUT->pix_icon('t/copy',
-                            get_string('duplicatebookingoption', 'mod_booking')) .
-                        get_string('duplicatebookingoption', 'mod_booking')) . '</div>';
-
+                            'returnto' => 'url', 'returnurl' => $returnurl,
+                        ]
+                    ), $OUTPUT->pix_icon(
+                        't/copy',
+                        get_string('duplicatebookingoption', 'mod_booking')
+                    ) .
+                            get_string('duplicatebookingoption', 'mod_booking')) . '</div>';
+    
                     $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(
                         new moodle_url('/mod/booking/report.php', [
-                            'id' => $cmid,
-                            'optionid' => $optionid,
-                            'action' => 'deletebookingoption',
-                            'sesskey' => sesskey(),
-                            'returnto' => 'url',
-                            'returnurl' => $returnurl,
-                        ]),
+                                'id' => $cmid,
+                                'optionid' => $optionid,
+                                'action' => 'deletebookingoption',
+                                'sesskey' => sesskey(),
+                                'returnto' => 'url',
+                                'returnurl' => $returnurl,
+                            ]),
                         $OUTPUT->pix_icon('t/delete', get_string('deletethisbookingoption', 'mod_booking')) .
-                            get_string('deletethisbookingoption', 'mod_booking')
-                ) . '</div>';
-            }
-            // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
-            // TODO: Move booking options to another option currently does not work correcly.
-            // We temporarily remove it from booking until we are sure, it works.
-            // We need to make sure it works for: teachers, optiondates, prices, answers customfields etc.
-            // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
-            /* $modinfo = get_fast_modinfo($this->booking->course);
-            $bookinginstances = isset($modinfo->instances['booking']) ? count($modinfo->instances['booking']) : 0;
-            if (has_capability('mod/booking:updatebooking', context_course::instance($this->booking->course->id)) &&
-                $bookinginstances > 1) {
-                $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(
-                        new moodle_url('/mod/booking/moveoption.php',
-                            array('id' => $cmid, 'optionid' => $optionid, 'sesskey' => sesskey())),
-                        $OUTPUT->pix_icon('t/move', get_string('moveoptionto', 'booking')) .
-                        get_string('moveoptionto', 'booking')) . '</div>';
-            } */
+                                get_string('deletethisbookingoption', 'mod_booking')
+                    ) . '</div>';
+                }
+                // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
+                // TODO: Move booking options to another option currently does not work correcly.
+                // We temporarily remove it from booking until we are sure, it works.
+                // We need to make sure it works for: teachers, optiondates, prices, answers customfields etc.
+                // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+                /* $modinfo = get_fast_modinfo($this->booking->course);
+                $bookinginstances = isset($modinfo->instances['booking']) ? count($modinfo->instances['booking']) : 0;
+                if (has_capability('mod/booking:updatebooking', context_course::instance($this->booking->course->id)) &&
+                    $bookinginstances > 1) {
+                    $ddoptions[] = '<div class="dropdown-item">' . html_writer::link(
+                            new moodle_url('/mod/booking/moveoption.php',
+                                array('id' => $cmid, 'optionid' => $optionid, 'sesskey' => sesskey())),
+                            $OUTPUT->pix_icon('t/move', get_string('moveoptionto', 'booking')) .
+                            get_string('moveoptionto', 'booking')) . '</div>';
+                } */
             }
         }
 
@@ -1291,7 +1317,6 @@ class bookingoptions_wbtable extends wunderbyte_table
         $ret = format_text($description);
 
         if (!empty(get_config('booking', 'collapsedescriptionmaxlength'))) {
-
             $maxlength = (int)get_config('booking', 'collapsedescriptionmaxlength');
 
             // Show collapsible for long descriptions.

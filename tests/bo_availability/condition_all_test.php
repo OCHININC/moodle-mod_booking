@@ -206,6 +206,7 @@ final class condition_all_test extends advanced_testcase {
         $record->courseid = $course2->id;
         $record->maxanswers = 2;
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
 
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
@@ -393,6 +394,7 @@ final class condition_all_test extends advanced_testcase {
         $record->courseid = $course2->id;
         $record->maxanswers = 2;
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
         $option1 = $plugingenerator->create_option($record);
 
         $settings = singleton_service::get_instance_of_booking_option_settings($option1->id);
@@ -547,6 +549,7 @@ final class condition_all_test extends advanced_testcase {
         $record->courseid = $course2->id;
         $record->maxanswers = 2;
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
         $option1 = $plugingenerator->create_option($record);
 
         $settings = singleton_service::get_instance_of_booking_option_settings($option1->id);
@@ -1312,6 +1315,7 @@ final class condition_all_test extends advanced_testcase {
         $record->maxoverbooking = 2;
         $record->waitforconfirmation = 1;
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
 
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
@@ -1626,7 +1630,8 @@ final class condition_all_test extends advanced_testcase {
 
         // Disable allowoverbooking at all.
         $res = set_config('allowoverbooking', 0, 'booking');
-        $res = set_config('allowoverbooking', null, 'booking');
+        // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+        /* $res = set_config('allowoverbooking', null, 'booking'); */
 
         $record = new stdClass();
         $record->bookingid = $booking1->id;
@@ -1637,6 +1642,7 @@ final class condition_all_test extends advanced_testcase {
         $record->maxoverbooking = 0;  // Disable waitinglist.
         $record->waitforconfirmation = 0; // Waitinglist nof enforced.
         $record->useprice = 1; // Use price from the default category.
+        $record->importing = 1;
 
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
@@ -1866,43 +1872,43 @@ final class condition_all_test extends advanced_testcase {
         $record->courseid = 0;
         $record->maxanswers = 2;
         $record->disablebookingusers = 0;
+        $record->optiondateid_0 = "0";
+        $record->daystonotify_0 = "0";
+        $record->coursestarttime_0 = strtotime('now + 3 day');
+        $record->courseendtime_0 = strtotime('now + 4 day');
         $record->optiondateid_1 = "0";
         $record->daystonotify_1 = "0";
-        $record->coursestarttime_1 = strtotime('now + 3 day');
-        $record->courseendtime_1 = strtotime('now + 4 day');
-        $record->optiondateid_2 = "0";
-        $record->daystonotify_2 = "0";
-        $record->coursestarttime_2 = strtotime('now + 6 day');
-        $record->courseendtime_2 = strtotime('now + 7 day');
+        $record->coursestarttime_1 = strtotime('now + 6 day');
+        $record->courseendtime_1 = strtotime('now + 7 day');
 
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
         $option1 = $plugingenerator->create_option($record);
 
         // Times are overlapping, so expected to be blocked by this condtion.
-        $record->coursestarttime_1 = strtotime('now + 2 day');
-        $record->courseendtime_1 = strtotime('now + 3 day');
-        $record->coursestarttime_2 = strtotime('now + 5 day');
-        $record->courseendtime_2 = strtotime('now + 8 day');
+        $record->coursestarttime_0 = strtotime('now + 2 day');
+        $record->courseendtime_0 = strtotime('now + 3 day');
+        $record->coursestarttime_1 = strtotime('now + 5 day');
+        $record->courseendtime_1 = strtotime('now + 8 day');
         $record->bo_cond_nooverlapping_restrict = 1;
         $record->bo_cond_nooverlapping_handling = MOD_BOOKING_COND_OVERLAPPING_HANDLING_BLOCK;
         $option2 = $plugingenerator->create_option($record);
 
         // Not overlapping.
         $record->text = '2 sessions should overlap';
-        $record->coursestarttime_1 = strtotime('now + 10 day');
-        $record->courseendtime_1 = strtotime('now + 11 day');
-        $record->coursestarttime_2 = strtotime('now + 14 day');
-        $record->courseendtime_2 = strtotime('now + 15 day');
+        $record->coursestarttime_0 = strtotime('now + 10 day');
+        $record->courseendtime_0 = strtotime('now + 11 day');
+        $record->coursestarttime_1 = strtotime('now + 14 day');
+        $record->courseendtime_1 = strtotime('now + 15 day');
         $record->bo_cond_nooverlapping_restrict = 1;
         $record->bo_cond_nooverlapping_handling = MOD_BOOKING_COND_OVERLAPPING_HANDLING_BLOCK;
         $option3 = $plugingenerator->create_option($record);
 
         // Overlapping without flag. Should trigger NOOVERLAPPINGPROXY.
-        $record->coursestarttime_1 = strtotime('now + 1 day');
-        $record->courseendtime_1 = strtotime('now + 11 day');
-        $record->coursestarttime_2 = strtotime('now + 8 day');
-        $record->courseendtime_2 = strtotime('now + 15 day');
+        $record->coursestarttime_0 = strtotime('now + 1 day');
+        $record->courseendtime_0 = strtotime('now + 11 day');
+        $record->coursestarttime_1 = strtotime('now + 8 day');
+        $record->courseendtime_1 = strtotime('now + 15 day');
         $record->bo_cond_nooverlapping_restrict = 0;
         unset($record->bo_cond_nooverlapping_handling);
         $option4 = $plugingenerator->create_option($record);
@@ -1913,14 +1919,14 @@ final class condition_all_test extends advanced_testcase {
         $record->coursestarttime = strtotime('now + 12 day');
         $record->courseendtime = strtotime('now + 13 day');
         $record->bo_cond_nooverlapping_restrict = 1;
+        unset($record->coursestarttime_0);
+        unset($record->courseendtime_0);
         unset($record->coursestarttime_1);
         unset($record->courseendtime_1);
-        unset($record->coursestarttime_2);
-        unset($record->courseendtime_2);
+        unset($record->optiondateid_0);
+        unset($record->daystonotify_0);
         unset($record->optiondateid_1);
         unset($record->daystonotify_1);
-        unset($record->optiondateid_2);
-        unset($record->daystonotify_2);
         $record->bo_cond_nooverlapping_handling = MOD_BOOKING_COND_OVERLAPPING_HANDLING_BLOCK;
         $option5 = $plugingenerator->create_option($record);
 
@@ -1988,7 +1994,7 @@ final class condition_all_test extends advanced_testcase {
             'userleave' => ['text' => 'text'],
             'tags' => '',
             'completion' => 2,
-            'showviews' => ['mybooking,myoptions,showall,showactive,myinstitution'],
+            'showviews' => ['mybooking,myoptions,optionsiamresponsiblefor,showall,showactive,myinstitution'],
         ];
         return ['bdata' => [$bdata]];
     }

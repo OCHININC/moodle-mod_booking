@@ -23,6 +23,10 @@ Feature: Edit booking's organizer, info and semester settings as a teacher or ad
       | activity | course | name       | intro                  | bookingmanager | eventtype | Default view for booking options | Send confirmation e-mail |
       | booking  | C1     | My booking | My booking description | teacher1       | Webinar   | All bookings                     | Yes                      |
     And I create booking option "New option" in "My booking"
+    ## Unfortunately, TinyMCE is slow and has misbehavior which might cause number of site-wide issues. So - we disable it.
+    And the following config values are set as admin:
+      | config      | value         |
+      | texteditors | atto,textarea |
     And I change viewport size to "1366x10000"
 
   @javascript
@@ -108,7 +112,7 @@ Feature: Edit booking's organizer, info and semester settings as a teacher or ad
   @javascript
   Scenario: Booking settings - access the teacher pages without login
     Given the following "mod_booking > options" exist:
-      | booking    | text                      | course | description  | optiondateid_1 | daystonotify_1 | coursestarttime_1 | courseendtime_1 | teachersforoption |
+      | booking    | text                      | course | description  | optiondateid_0 | daystonotify_0 | coursestarttime_0 | courseendtime_0 | teachersforoption |
       | My booking | Booking option - Teachers | C1     | Option deskr | 0              | 0              | ## tomorrow ##    | ## +2 days ##   | teacher1          |
     And I log in as "admin"
     And I set the following administration settings values:
@@ -130,7 +134,7 @@ Feature: Edit booking's organizer, info and semester settings as a teacher or ad
   @javascript
   Scenario: Booking settings - display teachers email pages without login
     Given the following "mod_booking > options" exist:
-      | booking    | text                      | course | description  | optiondateid_1 | daystonotify_1 | coursestarttime_1 | courseendtime_1 | teachersforoption |
+      | booking    | text                      | course | description  | optiondateid_0 | daystonotify_0 | coursestarttime_0 | courseendtime_0 | teachersforoption |
       | My booking | Booking option - Teachers | C1     | Option deskr | 0              | 0              | ## tomorrow ##    | ## +2 days ##   | teacher1          |
     And I log in as "admin"
     And I set the following administration settings values:
@@ -195,7 +199,7 @@ Feature: Edit booking's organizer, info and semester settings as a teacher or ad
   @javascript
   Scenario: Booking settings - display link to Moodle course on booked button
     Given the following "mod_booking > options" exist:
-      | booking    | text         | course | description  | optiondateid_1 | daystonotify_1 | coursestarttime_1 | courseendtime_1 | teachersforoption |
+      | booking    | text         | course | description  | optiondateid_0 | daystonotify_0 | coursestarttime_0 | courseendtime_0 | teachersforoption |
       | My booking | LinkOnBooked | C1     | Option deskr | 0              | 0              | ## tomorrow ##    | ## +2 days ##   | teacher1          |
     And the following "mod_booking > answers" exist:
       | booking    | option       | user     |

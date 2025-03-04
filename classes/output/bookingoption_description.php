@@ -180,6 +180,9 @@ class bookingoption_description implements renderable, templatable {
     /** @var bool $selflearningcourseshowdurationinfo */
     private $selflearningcourseshowdurationinfo = null;
 
+    /** @var bool $selflearningcourseshowdurationinfoexpired */
+    private $selflearningcourseshowdurationinfoexpired = null;
+
     /**
      * Constructor.
      *
@@ -283,7 +286,13 @@ class bookingoption_description implements renderable, templatable {
                 if (isset($ba->usersonlist[$buyforuser->id])) {
                     $timebooked = $ba->usersonlist[$buyforuser->id]->timecreated;
                     $timeremainingsec = $timebooked + $settings->duration - time();
-                    $this->timeremaining = format_time($timeremainingsec);
+
+                    if ($timeremainingsec <= 0) {
+                        $this->selflearningcourseshowdurationinfo = null;
+                        $this->selflearningcourseshowdurationinfoexpired = true;
+                    } else {
+                        $this->timeremaining = format_time($timeremainingsec);
+                    }
                 }
             }
         }
@@ -291,8 +300,10 @@ class bookingoption_description implements renderable, templatable {
         // Show info until when the booking option can be cancelled.
         // If cancelling was disabled in the booking option or for the whole instance...
         // ...then we do not show the cancel until info.
-        if (booking_option::get_value_of_json_by_key($optionid, 'disablecancel')
-            || booking::get_value_of_json_by_key($settings->bookingid, 'disablecancel')) {
+        if (
+            booking_option::get_value_of_json_by_key($optionid, 'disablecancel')
+            || booking::get_value_of_json_by_key($settings->bookingid, 'disablecancel')
+        ) {
             $this->canceluntil = null;
         } else {
             // Check if the option has its own canceluntil date.
@@ -584,6 +595,7 @@ class bookingoption_description implements renderable, templatable {
             'institution' => $this->institution,
             'selflearningcourse' => $this->selflearningcourse,
             'selflearningcourseshowdurationinfo' => $this->selflearningcourseshowdurationinfo,
+            'selflearningcourseshowdurationinfoexpired' => $this->selflearningcourseshowdurationinfoexpired,
             'duration' => $this->duration,
             'dates' => $this->dates,
             'datesexist' => $this->datesexist,

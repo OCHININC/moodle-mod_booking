@@ -91,6 +91,25 @@ define('MOD_BOOKING_STATUSPARAM_NOTIFYMELIST', 3); // Get message when place is 
 define('MOD_BOOKING_STATUSPARAM_NOTBOOKED', 4);
 define('MOD_BOOKING_STATUSPARAM_DELETED', 5);
 
+// Define booking presence status parameters.
+define('MOD_BOOKING_PRESENCE_STATUS_COMPLETE', 1);
+define('MOD_BOOKING_PRESENCE_STATUS_INCOMPLETE', 2);
+define('MOD_BOOKING_PRESENCE_STATUS_NOSHOW', 3);
+define('MOD_BOOKING_PRESENCE_STATUS_FAILED', 4);
+define('MOD_BOOKING_PRESENCE_STATUS_UNKNOWN', 5);
+define('MOD_BOOKING_PRESENCE_STATUS_ATTENDING', 6);
+define('MOD_BOOKING_PRESENCE_STATUS_EXCUSED', 7);
+
+define('MOD_BOOKING_ALL_POSSIBLE_PRESENCES_ARRAY', [
+    MOD_BOOKING_PRESENCE_STATUS_UNKNOWN => get_string('statusunknown', 'mod_booking'),
+    MOD_BOOKING_PRESENCE_STATUS_ATTENDING => get_string('statusattending', 'mod_booking'),
+    MOD_BOOKING_PRESENCE_STATUS_COMPLETE => get_string('statuscomplete', 'mod_booking'),
+    MOD_BOOKING_PRESENCE_STATUS_INCOMPLETE => get_string('statusincomplete', 'mod_booking'),
+    MOD_BOOKING_PRESENCE_STATUS_NOSHOW => get_string('statusnoshow', 'mod_booking'),
+    MOD_BOOKING_PRESENCE_STATUS_FAILED => get_string('statusfailed', 'mod_booking'),
+    MOD_BOOKING_PRESENCE_STATUS_EXCUSED => get_string('statusexcused', 'mod_booking'),
+]);
+
 // Params to define behavior of booking_option::update.
 define('MOD_BOOKING_UPDATE_OPTIONS_PARAM_DEFAULT', 1);
 define('MOD_BOOKING_UPDATE_OPTIONS_PARAM_REDUCED', 2);
@@ -247,6 +266,7 @@ define('MOD_BOOKING_OPTION_FIELD_ATTACHMENT', 430);
 define('MOD_BOOKING_OPTION_FIELD_NOTIFICATIONTEXT', 440);
 define('MOD_BOOKING_OPTION_FIELD_REMOVEAFTERMINUTES', 450);
 define('MOD_BOOKING_OPTION_FIELD_HOWMANYUSERS', 470);
+define('MOD_BOOKING_OPTION_FIELD_APPLYBOOKINGRULE', 475);
 define('MOD_BOOKING_OPTION_FIELD_BEFOREBOOKEDTEXT', 480);
 define('MOD_BOOKING_OPTION_FIELD_BEFORECOMPLETEDTEXT', 490);
 define('MOD_BOOKING_OPTION_FIELD_AFTERCOMPLETEDTEXT', 500);
@@ -255,6 +275,7 @@ define('MOD_BOOKING_OPTION_FIELD_BOOKUSERS', 520);
 define('MOD_BOOKING_OPTION_FIELD_TIMEMODIFIED', 530);
 define('MOD_BOOKING_OPTION_FIELD_TEMPLATESAVE', 600);
 define('MOD_BOOKING_OPTION_FIELD_EVENTSLIST', 700);
+define('MOD_BOOKING_OPTION_FIELD_RULES', 800);
 define('MOD_BOOKING_OPTION_FIELD_AFTERSUBMITACTION', 999);
 
 // To define execution of field methods.
@@ -278,6 +299,7 @@ define('MOD_BOOKING_HEADER_SUBBOOKINGS', 'bookingsubbookingsheader');
 define('MOD_BOOKING_HEADER_CUSTOMFIELDS', 'category_'); // There can be multiple headers, with custom names.
 define('MOD_BOOKING_HEADER_TEMPLATESAVE', 'templateheader');
 define('MOD_BOOKING_HEADER_COURSES', 'coursesheader');
+define('MOD_BOOKING_HEADER_RULES', 'rulesheader');
 
 define('MOD_BOOKING_MAX_CUSTOM_FIELDS', 3);
 define('MOD_BOOKING_FORM_OPTIONDATEID', 'optiondateid_');
@@ -296,10 +318,29 @@ define('MOD_BOOKING_SQL_FILTER_ACTIVE_BO_TIME', 2);
 define('MOD_BOOKING_CLASSES_EXCLUDED_FROM_CHANGES_TRACKING', [
 ]);
 
-// SQL Filter.
+// Overlapping handling.
 define('MOD_BOOKING_COND_OVERLAPPING_HANDLING_EMPTY', 0);
 define('MOD_BOOKING_COND_OVERLAPPING_HANDLING_WARN', 1);
 define('MOD_BOOKING_COND_OVERLAPPING_HANDLING_BLOCK', 2);
+
+// Autoenrol status.
+define('MOD_BOOKING_AUTOENROL_STATUS_EXCEPTION', 0);
+define('MOD_BOOKING_AUTOENROL_STATUS_ALREADY_ENROLLED', 1);
+define('MOD_BOOKING_AUTOENROL_STATUS_SUCCESS', 2);
+define('MOD_BOOKING_AUTOENROL_STATUS_LINK_NOT_VALID', 3);
+define('MOD_BOOKING_AUTOENROL_STATUS_NO_MORE_SEATS', 4);
+define('MOD_BOOKING_AUTOENROL_STATUS_LOGGED_IN_AS_GUEST', 5);
+define('MOD_BOOKING_AUTOENROL_STATUS_WAITINGLIST', 6);
+
+// Status for user submit response (enrolment into bookingoption).
+// 1 if we just added this booking option to the shopping cart, 2 for confirmation.
+define('MOD_BOOKING_BO_SUBMIT_STATUS_DEFAULT', 0);
+define('MOD_BOOKING_BO_SUBMIT_STATUS_ADDED_TO_CART', 1);
+define('MOD_BOOKING_BO_SUBMIT_STATUS_CONFIRMATION', 2);
+define('MOD_BOOKING_BO_SUBMIT_STATUS_UN_CONFIRM', 3);
+define('MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL', 4);
+
+
 
 /**
  * Booking get coursemodule info.
@@ -680,6 +721,25 @@ function booking_add_instance($booking) {
 
     if (isset($booking->allowupdatetimestamp)) {
         booking::add_data_to_json($booking, 'allowupdatetimestamp', $booking->allowupdatetimestamp);
+    }
+
+    if (isset($booking->viewparam)) {
+        // Save list view as default value.
+        booking::add_data_to_json($booking, "viewparam", MOD_BOOKING_VIEW_PARAM_LIST);
+    }
+
+    if (isset($booking->disablebooking)) {
+        // This will store the correct JSON to $optionvalues->json.
+        booking::add_data_to_json($booking, "disablebooking", $booking->disablebooking);
+    }
+
+    if (isset($booking->overwriteblockingwarnings)) {
+        // This will store the correct JSON to $optionvalues->json.
+        booking::add_data_to_json($booking, "overwriteblockingwarnings", $booking->overwriteblockingwarnings);
+    }
+    if (isset($booking->billboardtext)) {
+        // This will store the correct JSON to $optionvalues->json.
+        booking::add_data_to_json($booking, "billboardtext", $booking->billboardtext);
     }
 
     // If no policy was entered, we still have to check for HTML tags.

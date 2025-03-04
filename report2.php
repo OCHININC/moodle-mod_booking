@@ -27,26 +27,141 @@ require_once(__DIR__ . '/../../config.php');
 require_once($CFG->dirroot . '/mod/booking/lib.php');
 
 use mod_booking\booking;
+use mod_booking\option\dates_handler;
 use mod_booking\output\booked_users;
 use mod_booking\singleton_service;
+use mod_booking\utils\wb_payment;
 
 global $PAGE, $SITE;
 
+if (!get_config('booking', 'bookingstracker') || !wb_payment::pro_version_is_activated()) {
+    require_login(1, false);
+    $PAGE->set_url(new moodle_url('/mod/booking/report2.php'));
+    echo "<div class='alert alert-warning'>" . get_string('error:bookingstrackernotactivated', 'mod_booking') . "</div>";
+}
+
+$PAGE->requires->js_call_amd('mod_booking/bookingjslib', 'init');
+
+$optiondateid = optional_param('optiondateid', 0, PARAM_INT);
 $optionid = optional_param('optionid', 0, PARAM_INT);
 $cmid = optional_param('cmid', 0, PARAM_INT);
 $courseid = optional_param('courseid', 0, PARAM_INT);
 
 $ticketicon = '<i class="fa fa-fw fa-sm fa-ticket" aria-hidden="true"></i>&nbsp;';
 $linkicon = '<i class="fa fa-fw fa-xs fa-external-link" aria-hidden="true"></i>&nbsp;';
-$divider = "<span class='mt-1 ml-1 mr-1 mt-3'>
-    <i class='fa-solid fa-2xs fa-arrow-right' aria-hidden='true' style='color: gray;'></i>
+$divider = "<span class='mt-1 ml-1 mr-1 mt-4'>
+    <i class='fa-solid fa-2xs fa-angle-right' aria-hidden='true' style='color: gray;'></i>
 </span>";
 
 $r2syscontext = context_system::instance();
 $r2syscap = has_capability('mod/booking:managebookedusers', $r2syscontext);
 $r2systemurl = new moodle_url('/mod/booking/report2.php');
 
-if (!empty($optionid)) {
+if (!empty($optiondateid)) {
+    // We are in optiondate (session) scope.
+    $PAGE->set_url(new moodle_url('/mod/booking/report2.php', ['optionid' => $optionid, 'optiondateid' => $optiondateid]));
+    $scopes = ['system', 'course', 'instance', 'option', 'optiondate'];
+    $scope = 'optiondate'; // A specific date of a booking option.
+    $scopeid = $optiondateid;
+    if (empty($optionid)) {
+        $optionid = $DB->get_field('booking_optiondates', 'optionid', ['id' => $optiondateid]);
+    }
+    $optionsettings = singleton_service::get_instance_of_booking_option_settings($optionid);
+    $cmid = $optionsettings->cmid;
+    $bookingsettings = singleton_service::get_instance_of_booking_settings_by_cmid($cmid);
+    [$course, $cm] = get_course_and_cm_from_cmid($cmid);
+    $courseid = $course->id;
+    require_course_login($course, false, $cm);
+    $urlparams = ["optionid" => $optionid, "optiondateid" => $optiondateid]; // For PAGE url.
+
+    // Define scope contexts.
+    $r2coursecontext = context_course::instance($courseid);
+    $r2instancecontext = context_module::instance($cmid);
+
+    // Check capabilities.
+    require_capability('mod/booking:readresponses', $r2instancecontext);
+    require_capability('mod/booking:managebookedusers', $r2instancecontext);
+    if (
+        (
+            has_capability('mod/booking:updatebooking', $r2instancecontext)
+            || (
+                has_capability('mod/booking:addeditownoption', $r2instancecontext)
+                && booking_check_if_teacher($optionid)
+            )
+        ) == false
+    ) {
+        throw new moodle_exception('nopermissions');
+    }
+
+    $r2courseurl = new moodle_url('/mod/booking/report2.php', ['courseid' => $courseid]);
+    $r2instanceurl = new moodle_url('/mod/booking/report2.php', ['cmid' => $cmid]);
+    $r2optionurl = new moodle_url('/mod/booking/report2.php', ['optionid' => $optionid]);
+
+    // To create the correct links.
+    $r2coursecap = has_capability('mod/booking:managebookedusers', $r2coursecontext);
+    $r2instancecap = has_capability('mod/booking:managebookedusers', $r2instancecontext);
+
+    // Get the optiondate record from DB.
+    $optiondate = $DB->get_record('booking_optiondates', ['id' => $optiondateid]);
+    $prettydatestring = dates_handler::prettify_optiondates_start_end(
+        $optiondate->coursestarttime,
+        $optiondate->courseendtime,
+        current_language(),
+        true
+    );
+
+    // We only show links, if we have the matching capabilities.
+    $heading = get_string('managebookedusers_heading', 'mod_booking', $optionsettings->get_title_with_prefix()) .
+        " - " . $prettydatestring;
+    $navhtml = "<div class='report2-nav mb-3 flex-wrap-container'>" .
+        ($r2syscap ? "<a href='{$r2systemurl}' class='report2-system-border'>" :
+            "<span class='report2-system-border'>") .
+        $ticketicon . booking::shorten_text($SITE->fullname) .
+        ($r2syscap ? "</a>" : "</span>") .
+        $divider .
+        ($r2coursecap ? "<a href='{$r2courseurl}' class='report2-course-border'>" :
+            "<span class='report2-course-border'>") .
+        $ticketicon . booking::shorten_text($course->fullname) .
+        ($r2coursecap ? "</a>" : "</span>") .
+        $divider .
+        ($r2instancecap ? "<a href='{$r2instanceurl}' class='report2-instance-border'>" :
+            "<span class='report2-instance-border'>") .
+        $ticketicon . booking::shorten_text($bookingsettings->name) .
+        ($r2instancecap ? "</a>" : "</span>") .
+        $divider .
+        "<a href='{$r2optionurl}' class='report2-option-border'>" .
+        $ticketicon . $optionsettings->get_title_with_prefix() .
+        "</a>";
+
+    // Create a navigation dropdown for all optiondates (sessions) of the booking option.
+    $optiondates = $optionsettings->sessions;
+    if (!empty($optiondates) && count($optiondates) > 1) {
+        $data['optiondatesexist'] = true;
+        foreach ($optiondates as &$optiondate) {
+            $optiondate = (array) $optiondate;
+            $optiondate['prettydate'] = dates_handler::prettify_optiondates_start_end(
+                $optiondate['coursestarttime'],
+                $optiondate['courseendtime'],
+                current_language(),
+                true
+            );
+            $dateurl = new moodle_url('/mod/booking/report2.php', [
+                'optionid' => $optionid,
+                'optiondateid' => $optiondate['id'],
+            ]);
+            $optiondate['dateurl'] = $dateurl->out(false);
+        }
+        $firstentry['prettydate'] = get_string('choose...', 'mod_booking');
+        $firstentry['dateurl'] = $PAGE->url; // The current page.
+        array_unshift($optiondates, $firstentry);
+        $data['optiondates'] = array_values((array) $optiondates);
+        // Now we just append the dropdown to the navigation HTML.
+        $navhtml .= $divider . $OUTPUT->render_from_template('mod_booking/report/navigation_dropdown', $data);
+    }
+    $navhtml .= "</div>";
+} else if (!empty($optionid)) {
+    // We are in option scope.
+    $PAGE->set_url(new moodle_url('/mod/booking/report2.php', ['optionid' => $optionid]));
     $scopes = ['system', 'course', 'instance', 'option'];
     $optionsettings = singleton_service::get_instance_of_booking_option_settings($optionid);
     $cmid = $optionsettings->cmid;
@@ -70,18 +185,28 @@ if (!empty($optionid)) {
     $r2coursecontext = context_course::instance($courseid);
     $r2instancecontext = context_module::instance($cmid);
 
-    // Capability checks.
-    $isteacher = booking_check_if_teacher($optionid);
-    if (!($isteacher || has_capability('mod/booking:viewreports', $r2instancecontext))) {
-        require_capability('mod/booking:readresponses', $r2instancecontext);
+    // Check capabilities.
+    require_capability('mod/booking:readresponses', $r2instancecontext);
+    require_capability('mod/booking:managebookedusers', $r2instancecontext);
+    if (
+        (
+            has_capability('mod/booking:updatebooking', $r2instancecontext)
+            || (
+                has_capability('mod/booking:addeditownoption', $r2instancecontext)
+                && booking_check_if_teacher($optionid)
+            )
+        ) == false
+    ) {
+        throw new moodle_exception('nopermissions');
     }
+
     // To create the correct links.
     $r2coursecap = has_capability('mod/booking:managebookedusers', $r2coursecontext);
     $r2instancecap = has_capability('mod/booking:managebookedusers', $r2instancecontext);
 
     // We only show links, if we have the matching capabilities.
     $heading = get_string('managebookedusers_heading', 'mod_booking', $optionsettings->get_title_with_prefix());
-    $navhtml = "<div class='report2-nav flex-wrap-container'>" .
+    $navhtml = "<div class='report2-nav mb-3 flex-wrap-container'>" .
         ($r2syscap ? "<a href='{$r2systemurl}' class='report2-system-border'>" :
             "<span class='report2-system-border'>") .
         $ticketicon . booking::shorten_text($SITE->fullname) .
@@ -99,8 +224,37 @@ if (!empty($optionid)) {
         $divider .
         "<a href='{$r2optionurl}' class='report2-option-border'>" .
         $linkicon . $optionsettings->get_title_with_prefix() .
-        "</a></div>";
+        "</a>";
+
+    // Create a navigation dropdown for all optiondates (sessions) of the booking option.
+    $optiondates = $optionsettings->sessions;
+    if (!empty($optiondates) && count($optiondates) > 1) {
+        $data['optiondatesexist'] = true;
+        foreach ($optiondates as &$optiondate) {
+            $optiondate = (array) $optiondate;
+            $optiondate['prettydate'] = dates_handler::prettify_optiondates_start_end(
+                $optiondate['coursestarttime'],
+                $optiondate['courseendtime'],
+                current_language(),
+                true
+            );
+            $dateurl = new moodle_url('/mod/booking/report2.php', [
+                'optionid' => $optionid,
+                'optiondateid' => $optiondate['id'],
+            ]);
+            $optiondate['dateurl'] = $dateurl->out(false);
+        }
+        $firstentry['prettydate'] = get_string('choose...', 'mod_booking');
+        $firstentry['dateurl'] = $PAGE->url; // The current page.
+        array_unshift($optiondates, $firstentry);
+        $data['optiondates'] = array_values((array) $optiondates);
+        // Now we just append the dropdown to the navigation HTML.
+        $navhtml .= $divider . $OUTPUT->render_from_template('mod_booking/report/navigation_dropdown', $data);
+    }
+    $navhtml .= "</div>";
 } else if (!empty($cmid)) {
+    // We are in instance scope.
+    $PAGE->set_url(new moodle_url('/mod/booking/report2.php', ['cmid' => $cmid]));
     $scopes = ['system', 'course', 'instance'];
     $scope = 'instance';
     $scopeid = $cmid;
@@ -121,6 +275,7 @@ if (!empty($optionid)) {
     $r2coursecap = has_capability('mod/booking:managebookedusers', $r2coursecontext);
     $r2instancecap = has_capability('mod/booking:managebookedusers', $r2instancecontext);
 
+    require_capability('mod/booking:readresponses', $r2instancecontext);
     require_capability('mod/booking:managebookedusers', $r2instancecontext);
 
     // We only show links, if we have the matching capabilities.
@@ -140,6 +295,8 @@ if (!empty($optionid)) {
         $linkicon . $bookingsettings->name .
         "</a>";
 } else if (!empty($courseid)) {
+    // We are in course scope.
+    $PAGE->set_url(new moodle_url('/mod/booking/report2.php', ['courseid' => $courseid]));
     $scopes = ['system', 'course'];
     $scope = 'course'; // A moodle course containing (a) booking option(s).
     $scopeid = $courseid;
@@ -155,6 +312,7 @@ if (!empty($optionid)) {
     // To create the correct links.
     $r2coursecap = has_capability('mod/booking:managebookedusers', $r2coursecontext);
 
+    require_capability('mod/booking:readresponses', $r2coursecontext);
     require_capability('mod/booking:managebookedusers', $r2coursecontext);
 
     // We only show links, if we have the matching capabilities.
@@ -169,14 +327,17 @@ if (!empty($optionid)) {
         $linkicon . $course->fullname .
         "</a>";
 } else {
+    // We are in system scope.
+    $PAGE->set_url(new moodle_url('/mod/booking/report2.php'));
     $scopes = ['system'];
-    require_login(0, false);
+    require_login(1, false);
     $scope = 'system'; // The whole site.
     $scopeid = 0;
     $urlparams = []; // For PAGE url.
 
     $r2systemurl = new moodle_url('/');
 
+    require_capability('mod/booking:readresponses', $r2syscontext);
     require_capability('mod/booking:managebookedusers', $r2syscontext);
 
     // We only show links, if we have the matching capabilities.
@@ -194,8 +355,8 @@ $url = new moodle_url('/mod/booking/report2.php', $urlparams);
 $PAGE->set_url($url);
 
 echo $OUTPUT->header();
-echo $OUTPUT->heading("<div class='mb-5'>" . $ticketicon . $heading . "</div>" .
-    "<div class='mt-3 mb-5'>$navhtml</div");
+echo $OUTPUT->heading("<div class='mt-3 mb-5'>$navhtml</div>" .
+    "<div class='mb-5'>" . $ticketicon . $heading . "</div>");
 
 // Now we render the booked users for the provided scope.
 $data = new booked_users(
@@ -205,7 +366,8 @@ $data = new booked_users(
     true,
     true,
     true,
-    true
+    true,
+    $cmid
 );
 $renderer = $PAGE->get_renderer('mod_booking');
 echo $renderer->render_booked_users($data);

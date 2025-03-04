@@ -39,7 +39,6 @@ use templatable;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class ruleslist implements renderable, templatable {
-
     /** @var array $rules */
     public $rules = [];
 
@@ -65,13 +64,21 @@ class ruleslist implements renderable, templatable {
 
         foreach ($rules as $rule) {
             $ruleobj = json_decode($rule->rulejson);
-            $rule->name = $ruleobj->name;
-            $rule->actionname = $ruleobj->actionname;
-            $rule->conditionname = $ruleobj->conditionname;
-            // Localize the names.
-            $rule->localizedrulename = get_string(str_replace("_", "", $rule->rulename), 'mod_booking');
-            $rule->localizedactionname = get_string(str_replace("_", "", $ruleobj->actionname), 'mod_booking');
-            $rule->localizedconditionname = get_string(str_replace("_", "", $ruleobj->conditionname), 'mod_booking');
+            $rule->name = $ruleobj->name ?? '';
+            $rule->actionname = $ruleobj->actionname ?? '';
+            $rule->conditionname = $ruleobj->conditionname ?? '';
+
+            // Localize the names if possible.
+            $localizedrulename = str_replace("_", "", $rule->rulename) ?? '';
+            $localizedconditionname = str_replace("_", "", $rule->conditionname) ?? '';
+            $localizedactionname = str_replace("_", "", $rule->actionname) ?? '';
+
+            $rule->localizedrulename = !empty($localizedrulename) ?
+                get_string($localizedrulename, 'mod_booking') : '';
+            $rule->localizedconditionname = !empty($localizedconditionname) ?
+                get_string($localizedconditionname, 'mod_booking') : '';
+            $rule->localizedactionname = !empty($localizedactionname) ?
+                get_string($localizedactionname, 'mod_booking') : '';
 
             // Filter for rules of this or other context.
             if ($rule->contextid == $contextid) {

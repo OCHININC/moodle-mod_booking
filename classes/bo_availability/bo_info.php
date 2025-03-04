@@ -895,7 +895,7 @@ class bo_info {
                 if (
                     get_config('booking', 'priceisalwayson')
                     || !empty(get_config('booking', 'displayemptyprice'))
-                    || !empty((float)($priceitem["price"] ?? 0))
+                    || (isset($priceitem["price"]) && !empty((float)$priceitem["price"]))
                 ) {
                     $currstring = isset($priceitem["currency"]) ? " " .  $priceitem["currency"] : '';
                     $label = $priceitem["price"];
@@ -1317,6 +1317,41 @@ class bo_info {
                 return "JSON_UNQUOTE(JSON_EXTRACT($dbcolumn, '$[$index]." . addslashes($jsonkey) . "'))";
             default:
                 throw new \moodle_exception('Unsupported database type for JSON key extraction.');
+        }
+    }
+
+    /**
+     * Returns part of an SQL query to extract a JSON key from a column based on the DB Family.
+     *
+     * @param string $dbcolumn
+     * @param string $jsonkey
+     * @param string $type
+     *
+     * @return string
+     *
+     */
+    public static function check_for_sqljson_key_in_object(string $dbcolumn, string $jsonkey, string $type = 'text'): string {
+        global $DB;
+
+        $databasetype = $DB->get_dbfamily();
+
+        switch ($databasetype) {
+            case 'postgres':
+                // PostgreSQL: Extract key from JSON object and cast to the desired type.
+                // Ensure that $type maps to valid PostgreSQL types like 'text', 'integer', etc.
+                return "($dbcolumn::jsonb ->> '" . addslashes($jsonkey) . "')::" . $type;
+
+            case 'mysql':
+                // MySQL: Extract key from JSON object and cast to the desired type.
+                // Handle numeric or string-based types accordingly.
+                if (in_array(strtolower($type), ['int', 'integer', 'bigint', 'float', 'double', 'decimal'], true)) {
+                    return "CAST(JSON_EXTRACT($dbcolumn, '$." . addslashes($jsonkey) . "') AS UNSIGNED)";
+                } else {
+                    return "CAST(JSON_EXTRACT($dbcolumn, '$." . addslashes($jsonkey) . "') AS CHAR)";
+                }
+
+            default:
+                throw new moodle_exception('Unsupported database type for JSON key extraction.');
         }
     }
 

@@ -159,7 +159,7 @@ class rules_info {
             return;
         }
 
-        $rule->add_rule_to_mform($mform, $repeateloptions);
+        $rule->add_rule_to_mform($mform, $repeateloptions, $ajaxformdata);
 
         $mform->addElement('html', '<hr>');
 
@@ -320,6 +320,10 @@ class rules_info {
         // Eventbased rules don't have to be reapplied.
         if ($records = booking_rules::get_list_of_saved_rules_by_context($contextid, '')) {
             foreach ($records as $record) {
+                if (empty($record->isactive)) {
+                    continue;
+                }
+
                 if ($record->rulename != 'rule_daysbefore') {
                     continue;
                 }
@@ -515,5 +519,16 @@ class rules_info {
             unset(self::$eventstoexecute[$key]);
             $event();
         }
+    }
+
+    /**
+     * Destroy all singletons.
+     *
+     * @return void
+     *
+     */
+    public static function destroy_singletons() {
+        self::$rulestoexecute = [];
+        self::$eventstoexecute = [];
     }
 }

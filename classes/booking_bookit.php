@@ -181,6 +181,8 @@ class booking_bookit {
                 $userid, // The userid for which all this will be rendered.
             );
 
+            $data->results = json_encode(array_keys($results));
+
             $datas[] = $data;
 
             $viewparam = booking::get_value_of_json_by_key($settings->bookingid, 'viewparam');
@@ -547,20 +549,6 @@ class booking_bookit {
         $bookingoption = booking_option::create_option_from_optionid($itemid);
 
         $settings = singleton_service::get_instance_of_booking_option_settings($itemid);
-
-        // Make sure that we only buy from instance the user has access to.
-        // This is just fraud prevention and can not happen ordinarily.
-        // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
-        /* $cm = get_coursemodule_from_instance('booking', $bookingoption->bookingid); */
-
-        // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
-        // TODO: Find out if the executing user has the right to access this instance.
-        // This can lead to problems, rights should be checked further up.
-        // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
-        /* $context = context_module::instance($cm->id);
-        if (!has_capability('mod/booking:choose', $context)) {
-            return null;
-        } */
 
         $user = price::return_user_to_buy_for($userid);
 
