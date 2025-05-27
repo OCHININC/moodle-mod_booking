@@ -1354,7 +1354,7 @@ function booking_extend_settings_navigation(settings_navigation $settings, navig
                 'nav_bookotherusers'
             );
             $completion = new \completion_info($course);
-            if ($completion->is_enabled($cm)) {
+            if ($completion->is_enabled($cm) && has_capability('mod/booking:managebookedusers', $context)) {
                 $navref->add(
                     get_string('bookuserswithoutcompletedactivity', 'booking'),
                     new moodle_url(
