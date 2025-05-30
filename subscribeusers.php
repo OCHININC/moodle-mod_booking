@@ -36,7 +36,7 @@ use mod_booking\output\booked_users;
 use mod_booking\output\renderer;
 use mod_booking\singleton_service;
 
-global $CFG, $DB, $COURSE, $PAGE, $OUTPUT;
+global $CFG, $DB, $COURSE, $PAGE, $OUTPUT, $USER;
 
 $id = required_param('id', PARAM_INT); // Course_module ID.
 $optionid = required_param('optionid', PARAM_INT);
@@ -82,6 +82,38 @@ if (!has_capability('mod/booking:bookforothers', $context)) {
 if (!booking_check_if_teacher($bookingoption->option)) {
     if (!(has_capability('mod/booking:subscribeusers', $context) || has_capability('moodle/site:accessallgroups', $context))) {
         throw new moodle_exception('nopermissions', 'core', $errorurl, get_string('bookotherusers', 'mod_booking'));
+    }
+}
+
+
+
+// Check if the booking option is restricted to install members.
+if(str_contains($bookingoption->settings->availability, 'installmembers')) {
+    $isavailable = false;
+
+    //if user can override the availability, we allow access.
+    if (has_capability('mod/booking:overrideboconditions', $context)) {
+        $isavailable = true;
+    }
+    else {
+        // Get user company and check if the install field is set to yes.
+        $company = company::by_userid($USER->id, true);
+        if($company) {
+            $installfield = $company->get('custom1');
+            $isinstall = strtolower($installfield) === 'yes';
+
+            if($isinstall) {
+                $isavailable = $isinstall;
+            }
+        }
+    }
+
+    if (!$isavailable) {
+        echo $OUTPUT->header();
+        echo $OUTPUT->heading(get_string('accessdenied', 'mod_booking'), 4);
+        echo get_string('nopermissiontoaccesspage', 'mod_booking');
+        echo $OUTPUT->footer();
+        die();
     }
 }
 
