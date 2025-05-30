@@ -27,6 +27,9 @@
 
 namespace mod_booking\output;
 
+use context_module;
+use context_course;
+use context_system;
 use local_wunderbyte_table\filters\types\datepicker;
 use local_wunderbyte_table\filters\types\standardfilter;
 use local_wunderbyte_table\wunderbyte_table;
@@ -155,7 +158,7 @@ class booked_users implements renderable, templatable {
             || $scope != 'supervisorteamreduced'
         ) {
             $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_WAITINGLIST);
-            $this->waitinglist = $showwaiting ? $this->render_users_table(
+            $this->waitinglist = $showwaiting && self::has_capability_in_scope($scope, $scopeid, 'mod/booking:managebookedusers') ? $this->render_users_table(
                 $scope,
                 $scopeid,
                 MOD_BOOKING_STATUSPARAM_WAITINGLIST,
@@ -168,7 +171,7 @@ class booked_users implements renderable, templatable {
             ) : null;
 
             $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_RESERVED);
-            $this->reservedusers = $showreserved ? $this->render_users_table(
+            $this->reservedusers = $showreserved && self::has_capability_in_scope($scope, $scopeid, 'mod/booking:managebookedusers') ? $this->render_users_table(
                 $scope,
                 $scopeid,
                 MOD_BOOKING_STATUSPARAM_RESERVED,
@@ -178,7 +181,7 @@ class booked_users implements renderable, templatable {
             ) : null;
 
             $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_NOTIFYMELIST);
-            $this->userstonotify = $showtonotify ? $this->render_users_table(
+            $this->userstonotify = $showtonotify && self::has_capability_in_scope($scope, $scopeid, 'mod/booking:managebookedusers') ? $this->render_users_table(
                 $scope,
                 $scopeid,
                 MOD_BOOKING_STATUSPARAM_NOTIFYMELIST,
@@ -188,7 +191,7 @@ class booked_users implements renderable, templatable {
             ) : null;
 
             $columns = $class->return_cols_for_tables(MOD_BOOKING_STATUSPARAM_DELETED);
-            $this->deletedusers = $showdeleted ? $this->render_users_table(
+            $this->deletedusers = $showdeleted && self::has_capability_in_scope($scope, $scopeid, 'mod/booking:managebookedusers') ? $this->render_users_table(
                 $scope,
                 $scopeid,
                 MOD_BOOKING_STATUSPARAM_DELETED,
@@ -596,5 +599,32 @@ class booked_users implements renderable, templatable {
             'optionstoconfirm' => get_string('optionstoconfirm', 'mod_booking'),
             'previouselybooked' => get_string('previouselybooked', 'mod_booking'),
         ];
+    }
+
+    /**
+     * Check if the current user has a given capability in the context determined by scope.
+     * @param string $scope
+     * @param int $scopeid
+     * @param string $capability
+     */
+    public static function has_capability_in_scope($scope, $scopeid, $capability) {
+        switch ($scope) {
+            case 'optiondate':
+                global $DB;
+                $optionid = $DB->get_field('booking_optiondates', 'optionid', ['id' => $scopeid]);
+                $cmid = singleton_service::get_instance_of_booking_option_settings($optionid)->cmid;
+                return has_capability($capability, context_module::instance($cmid));
+            case 'option':
+                $cmid = singleton_service::get_instance_of_booking_option_settings($scopeid)->cmid;
+                return has_capability($capability, context_module::instance($cmid));
+            case 'instance':
+                return has_capability($capability, context_module::instance($scopeid));
+            case 'course':
+                return has_capability($capability, context_course::instance($scopeid));
+            case 'system':
+                return has_capability($capability, context_system::instance());
+            default:
+                throw new moodle_exception('Invalid scope for booked users table.');
+        }
     }
 }
