@@ -220,7 +220,7 @@ class booked_users implements renderable, templatable {
 
         // For optiondate scope, we only show booked users.
         if ($scope != 'optiondate') {
-            $this->waitinglist = $showwaiting ? $this->render_users_table(
+            $this->waitinglist = $showwaiting && self::has_capability_in_scope($scope, $scopeid, 'mod/booking:managebookedusers') ? $this->render_users_table(
                 $scope,
                 $scopeid,
                 MOD_BOOKING_STATUSPARAM_WAITINGLIST,
@@ -230,7 +230,7 @@ class booked_users implements renderable, templatable {
                 true
             ) : null;
 
-            $this->reservedusers = $showreserved ? $this->render_users_table(
+            $this->reservedusers = $showreserved && self::has_capability_in_scope($scope, $scopeid, 'mod/booking:managebookedusers') ? $this->render_users_table(
                 $scope,
                 $scopeid,
                 MOD_BOOKING_STATUSPARAM_RESERVED,
@@ -239,7 +239,7 @@ class booked_users implements renderable, templatable {
                 $reservedusersheaders,
             ) : null;
 
-            $this->userstonotify = $showtonotify ? $this->render_users_table(
+            $this->userstonotify = $showtonotify && self::has_capability_in_scope($scope, $scopeid, 'mod/booking:managebookedusers') ? $this->render_users_table(
                 $scope,
                 $scopeid,
                 MOD_BOOKING_STATUSPARAM_NOTIFYMELIST,
@@ -248,7 +248,7 @@ class booked_users implements renderable, templatable {
                 $userstonotifyheaders
             ) : null;
 
-            $this->deletedusers = $showdeleted ? $this->render_users_table(
+            $this->deletedusers = $showdeleted && self::has_capability_in_scope($scope, $scopeid, 'mod/booking:managebookedusers') ? $this->render_users_table(
                 $scope,
                 $scopeid,
                 MOD_BOOKING_STATUSPARAM_DELETED,
