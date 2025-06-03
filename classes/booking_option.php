@@ -581,7 +581,8 @@ class booking_option {
             WHERE ba.userid = u.id AND
             u.deleted = 0 AND
             ba.optionid = :optionid AND
-            u.id = gm.userid AND gm.groupid $insql
+            u.id = gm.userid AND gm.groupid $insql AND
+            ba.waitinglist = 0
             GROUP BY u.id
             ORDER BY ba.timemodified ASC";
             $groupmembers = $DB->get_records_sql($sql, array_merge($params, $inparams));
