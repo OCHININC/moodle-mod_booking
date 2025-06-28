@@ -31,6 +31,7 @@ require_once($CFG->dirroot . '/mod/booking/locallib.php');
 
 use core\output\notification;
 use mod_booking\booking_utils;
+use mod_booking\bo_availability\bo_info;
 use mod_booking\form\subscribe_cohort_or_group_form;
 use mod_booking\output\booked_users;
 use mod_booking\output\renderer;
@@ -85,14 +86,14 @@ if (!booking_check_if_teacher($bookingoption->option)) {
     }
 }
 
-
+$canoverride = has_capability('mod/booking:overrideboconditions', $context);
 
 // Check if the booking option is restricted to install members.
 if(str_contains($bookingoption->settings->availability, 'installmembers')) {
     $isavailable = false;
 
     //if user can override the availability, we allow access.
-    if (has_capability('mod/booking:overrideboconditions', $context)) {
+    if ($canoverride) {
         $isavailable = true;
     }
     else {
@@ -112,6 +113,34 @@ if(str_contains($bookingoption->settings->availability, 'installmembers')) {
         echo $OUTPUT->header();
         echo $OUTPUT->heading(get_string('accessdenied', 'mod_booking'), 4);
         echo get_string('nopermissiontoaccesspage', 'mod_booking');
+        echo $OUTPUT->footer();
+        die();
+    }
+}
+
+// Check if booking option is available (not passed date restrictions).
+// Only allow access if user has override permissions OR booking is still available.
+if (!$canoverride) {
+    // Get the booking availability conditions to check if booking is still possible.
+    $conditionresults = bo_info::get_condition_results($optionid, $USER->id);
+    $isavailable = true;
+    
+    // Check if any condition blocks booking (specifically time-based conditions).
+    foreach ($conditionresults as $conditionresult) {
+        if (isset($conditionresult['classname']) && 
+            (strpos($conditionresult['classname'], 'booking_time') !== false || 
+             strpos($conditionresult['classname'], 'optionhasstarted') !== false)) {
+            if (!$conditionresult['available']) {
+                $isavailable = false;
+                break;
+            }
+        }
+    }
+    
+    if (!$isavailable) {
+        echo $OUTPUT->header();
+        echo $OUTPUT->heading(get_string('accessdenied', 'mod_booking'), 4);
+        echo get_string('bocondoptionhasstartednotavailable', 'mod_booking');
         echo $OUTPUT->footer();
         die();
     }
