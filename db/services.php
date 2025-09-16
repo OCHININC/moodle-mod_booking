@@ -48,7 +48,7 @@ $functions = [
         'classname' => 'mod_booking\external\addbookingoption',
         'description' => 'Add Booking option',
         'type' => 'write',
-        'capabilities' => '',
+        'capabilities' => 'mod/booking:updatebooking',
         'ajax' => false,
     ],
     'mod_booking_categories' => [
@@ -188,7 +188,7 @@ $functions = [
 
 $services = [
     'Booking module API' => [ // Very important, don't rename or will break local_bookingapi plugin!!!
-        'functions' => ['mod_booking_bookings', 'mod_booking_categories'],
+        'functions' => ['mod_booking_bookings', 'mod_booking_categories', 'mod_booking_addbookingoption'],
         'restrictedusers' => 0,
         'enabled' => 1,
     ],
