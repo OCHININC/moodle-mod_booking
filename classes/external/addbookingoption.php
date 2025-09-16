@@ -331,6 +331,18 @@ class addbookingoption extends external_api {
                 VALUE_DEFAULT,
                 0
             ),
+            'dayofweektime' => new external_value(
+                PARAM_RAW,
+                'Day of week time string for recurring sessions',
+                VALUE_DEFAULT,
+                ''
+            ),
+            'availability' => new external_value(
+                PARAM_RAW,
+                'JSON string containing booking availability conditions',
+                VALUE_DEFAULT,
+                '{}'
+            ),
             ]);
     }
 
@@ -384,6 +396,8 @@ class addbookingoption extends external_api {
      * @param string|null $boavenrolledincohorts
      * @param string|null $recommendedin
      * @param int|null $mergeparam
+     * @param string|null $dayofweektime
+     * @param string|null $availability
      * @return array
      * @throws \invalid_parameter_exception
      */
@@ -434,7 +448,9 @@ class addbookingoption extends external_api {
         ?string $boavenrolledincourse = null,
         ?string $boavenrolledincohorts = null,
         ?string $recommendedin = null,
-        ?int $mergeparam = null
+        ?int $mergeparam = null,
+        ?string $dayofweektime = null,
+        ?string $availability = null
     ): array {
 
         $params = external_api::validate_parameters(
@@ -487,6 +503,8 @@ class addbookingoption extends external_api {
                         'boavenrolledincohorts' => $boavenrolledincohorts,
                         'recommendedin' => $recommendedin,
                         'mergeparam' => $mergeparam,
+                        'dayofweektime' => $dayofweektime,
+                        'availability' => $availability,
             ]
         );
 
@@ -508,6 +526,9 @@ class addbookingoption extends external_api {
     public static function execute_returns(): external_single_structure {
         return new external_single_structure([
             'status' => new external_value(PARAM_BOOL, 'status: true if success'),
+            'bookingoptionid' => new external_value(PARAM_INT, 'id of created booking option'),
+            'bookingid' => new external_value(PARAM_INT, 'id of booking activity the option belongs to'),
+            'bookingurl' => new external_value(PARAM_URL, 'url to the booking option'),
             ]);
     }
 }

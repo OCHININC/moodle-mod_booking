@@ -32,6 +32,7 @@ use mod_booking\customfield\booking_handler;
 use mod_booking\singleton_service;
 use mod_booking\teachers_handler;
 use moodle_exception;
+use moodle_url;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -96,9 +97,21 @@ class webservice_import {
 
         $data->importing = 1;
 
+        // Automatically set datesmarker and addoptiondateseries when individual date fields are provided.
+        // This ensures proper date processing without requiring dayofweektime parameter.
+        if (!empty($data->coursestarttime) && !empty($data->courseendtime) && empty($data->dayofweektime)) {
+            $data->datesmarker = 1;
+            $data->addoptiondateseries = 1;
+        }
+
         $bookingoptionid = booking_option::update($data, $context ?? null);
 
-        return ['status' => 1];
+        return [
+            'status' => 1,
+            'bookingoptionid' => $bookingoptionid,
+            'bookingid' => $data->bookingid,
+            'bookingurl' => (new moodle_url('/mod/booking/view.php', array('id' => $data->cmid, 'optionid' => $bookingoptionid, 'whichview' => 'showonlyone')))->out(false),
+        ];
     }
 
     /**
