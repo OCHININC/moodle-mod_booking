@@ -50,7 +50,6 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class option_form extends dynamic_form {
-
     /**
      * {@inheritDoc}
      * @see moodleform::definition()
@@ -60,16 +59,20 @@ class option_form extends dynamic_form {
         $formdata = $this->_customdata ?? $this->_ajaxformdata;
 
         $cmid = $formdata['cmid'] ?? 0;
+        $optionid = $formdata['id'] ?? $formdata['optionid'] ?? 0;
 
         if (!empty($cmid)) {
             // We need context on this.
             $context = context_module::instance($cmid);
+        } else if (empty($cmid) && !empty($optionid)) {
+            $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+            $formdata['cmid'] = $settings->cmid;
+            $context = context_module::instance($settings->cmid);
         } else {
             $context = context_system::instance();
         }
 
         $formdata['context'] = $context;
-        $optionid = $formdata['optionid'];
 
         $mform = &$this->_form;
 
@@ -77,9 +80,15 @@ class option_form extends dynamic_form {
         $mform->setType('scrollpos', PARAM_INT);
 
         // Add all available fields in the right order.
-        fields_info::instance_form_definition($mform, $formdata);
+        $classes = fields_info::instance_form_definition($mform, $formdata);
 
-        $this->add_action_buttons(true, get_string('save'));
+        if (!empty($classes)) {
+            $this->add_action_buttons(true, get_string('save'));
+        } else {
+            $mform->addElement('html', '<div class="alert alert-warning">' .
+                get_string('error:formcapabilitymissing', 'mod_booking') .
+                '</div>');
+        }
     }
 
     /**
@@ -176,8 +185,10 @@ class option_form extends dynamic_form {
 
         $context = $this->get_context_for_dynamic_submission();
 
-        if (!has_capability('mod/booking:addeditownoption', $context)
-            && !has_capability('mod/booking:updatebooking', $context)) {
+        if (
+            !has_capability('mod/booking:addeditownoption', $context)
+            && !has_capability('mod/booking:updatebooking', $context)
+        ) {
                 throw new required_capability_exception($context, '', 'cant access edit form', '');
         }
     }
@@ -220,6 +231,10 @@ class option_form extends dynamic_form {
      * @return moodle_url
      */
     protected function get_page_url_for_dynamic_submission(): moodle_url {
-        return new moodle_url('/mod/booking/editoption.php');
+
+        // Strangely, we get the ajax formdata here without a key.
+        $cmid = $this->_ajaxformdata['cmid'] ?? 0;
+        $optionid = $this->_ajaxformdata['id'] ?? 0;
+        return new moodle_url('/mod/booking/editoption.php', ['id' => $cmid, 'optionid' => $optionid]);
     }
 }

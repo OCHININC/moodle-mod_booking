@@ -27,10 +27,12 @@ namespace mod_booking\booking_rules;
 
 use coding_exception;
 use context;
+use context_system;
 use context_module;
 use dml_exception;
 use mod_booking\output\ruleslist;
 use mod_booking\singleton_service;
+use Throwable;
 
 /**
  * Class to handle display and management of rules.
@@ -71,14 +73,28 @@ class booking_rules {
 
         global $DB;
 
-        if (empty(self::$rules)) {
-            $rules = $DB->get_records('booking_rules', null, 'id');
-            self::$rules = $rules;
-        }
+        $getrulessql =
+           "SELECT br.*
+              FROM {booking_rules} br
+              JOIN {context} c ON c.id = br.contextid
+              JOIN {course_modules} cm ON c.instanceid = cm.id AND c.contextlevel = 70 -- CONTEXT_MODULE
+              JOIN {modules} m ON m.id = cm.module AND m.name = 'booking'
+             WHERE cm.deletioninprogress = 0
+             UNION
+            SELECT br2.*
+              FROM {booking_rules} br2
+              JOIN {context} c2 ON c2.id = br2.contextid AND c2.contextlevel = 10 -- CONTEXT_SYSTEM
+          ORDER BY id ASC";
 
         if (empty($contextid)) {
+            self::$rules = $DB->get_records_sql($getrulessql);
             return self::$rules;
         }
+
+        if (empty(self::$rules)) {
+            self::$rules = $DB->get_records_sql($getrulessql);
+        }
+
         return array_filter(self::$rules, fn($a) => $a->contextid == $contextid);
     }
 
@@ -110,9 +126,12 @@ class booking_rules {
      * @throws dml_exception
      */
     public static function get_list_of_saved_rules_by_context(int $contextid = 1, string $eventname = '') {
-
-        $context = context::instance_by_id($contextid);
-        $path = $context->path;
+        try {
+            $context = context::instance_by_id($contextid);
+            $path = $context->path;
+        } catch (Throwable $e) {
+            return [];
+        }
 
         $patharray = explode('/', $path);
 
@@ -124,8 +143,10 @@ class booking_rules {
         if (empty($eventname)) {
             return array_filter($rules, fn($a) => in_array($a->contextid, $patharray));
         } else {
-            return array_filter($rules,
-                fn($a) => (in_array($a->contextid, $patharray) && ($a->eventname == $eventname)));
+            return array_filter(
+                $rules,
+                fn($a) => (in_array($a->contextid, $patharray) && ($a->eventname == $eventname))
+            );
         }
     }
 

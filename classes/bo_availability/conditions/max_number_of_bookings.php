@@ -29,7 +29,7 @@ namespace mod_booking\bo_availability\conditions;
 use context_system;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_option_settings;
 use mod_booking\singleton_service;
 use MoodleQuickForm;
@@ -49,7 +49,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class max_number_of_bookings implements bo_condition {
-
     /** @var int $id Standard Conditions have hardcoded ids. */
     public $id = MOD_BOOKING_BO_COND_MAX_NUMBER_OF_BOOKINGS;
 
@@ -102,11 +101,16 @@ class max_number_of_bookings implements bo_condition {
         // This value comes from booking instance settings, not $settings, which would be from booking option.
         $maxperuser = $booking->settings->maxperuser;
 
-        if (empty($maxperuser)) {
+        if (
+            empty($maxperuser)
+            || !isloggedin()
+            || isguestuser()
+        ) {
             $isavailable = true;
         } else {
             // Get the number of bookings, either MOD_BOOKING_STATUSPARAM_BOOKED or MOD_BOOKING_STATUSPARAM_WAITINGLIST.
-            $numberofbookings = booking_answers::number_of_active_bookings_for_user($userid, $settings->bookingid);
+            $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
+            $numberofbookings = $bookinganswer->get_count_of_answers_for_user($userid, $settings->bookingid);
 
             // If the $maxperuser-value is smaller then the value we are looking for, we return true.
             if ($numberofbookings < $maxperuser) {
@@ -126,10 +130,10 @@ class max_number_of_bookings implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -180,7 +184,7 @@ class max_number_of_bookings implements bo_condition {
 
         $isavailable = $this->is_available($settings, $userid, $not);
 
-        $description = $this->get_description_string($isavailable, $full, $settings);
+        $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_NONE, MOD_BOOKING_BO_BUTTON_MYALERT];
     }

@@ -36,13 +36,14 @@ use mod_booking\local\mobile\customformstore;
 use local_shopping_cart\shopping_cart;
 use local_shopping_cart\local\cartstore;
 use mod_booking\enrollink;
+use tool_mocktesttime\time_mock;
 
 /**
  * Tests for booking enrollink rules.
  *
  * @package mod_booking
  * @category test
- * @copyright 2023 Wunderbyte GmbH <info@wunderbyte.at>
+ * @copyright 2025 Wunderbyte GmbH <info@wunderbyte.at>
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  *
  * @runTestsInSeparateProcesses
@@ -54,6 +55,9 @@ final class rules_enrollink_test extends advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest();
+        time_mock::init();
+        time_mock::set_mock_time(strtotime('now'));
+        singleton_service::destroy_instance();
     }
 
     /**
@@ -64,15 +68,19 @@ final class rules_enrollink_test extends advanced_testcase {
         // Mandatory clean-up.
         singleton_service::destroy_instance();
         enrollink::destroy_instances();
+        // Mandatory to deal with static variable in the booking_rules.
+        rules_info::destroy_singletons();
+        booking_rules::$rules = [];
+        cartstore::reset();
     }
 
     /**
      * Test rule on answer and option being cancelled.
      *
      * @covers \mod_booking\event\enrollink_triggered
-     * @covers \mod_booking\booking_rules\rules\rule_react_on_event->execute
-     * @covers \mod_booking\booking_rules\conditions\select_student_in_bo->execute
-     * @covers \mod_booking\booking_rules\actions\send_mail->execute
+     * @covers \mod_booking\booking_rules\rules\rule_react_on_event::execute
+     * @covers \mod_booking\booking_rules\conditions\select_student_in_bo::execute
+     * @covers \mod_booking\booking_rules\actions\send_mail::execute
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -107,7 +115,7 @@ final class rules_enrollink_test extends advanced_testcase {
         $this->getDataGenerator()->enrol_user($teacher1->id, $course->id, 'editingteacher');
         $this->getDataGenerator()->enrol_user($student1->id, $course->id, 'student');
 
-        /** @var local_shopping_cart_generator $plugingenerator */
+        /** @var \local_shopping_cart_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('local_shopping_cart');
         $usercreditdata = [
             'userid' => $teacher1->id,
@@ -116,11 +124,11 @@ final class rules_enrollink_test extends advanced_testcase {
         ];
         $ucredit = $plugingenerator->create_user_credit($usercreditdata);
 
-        /** @var mod_booking_generator $plugingenerator */
+        /** @var \mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
 
         // Create booking rule - "bookinganswer_cancelled".
-        $actstr = '{"subject":"Enrollinksubj",';
+        $actstr = '{"sendical":0,"sendicalcreateorcancel":"","subject":"Enrollinksubj",';
         $actstr .= '"template":';
         $actstr .= '"<p>{enrollink}<\/p><p>{qrenrollink}<\/p><p>{#customform}<\/p><p>{customform}<\/p><p>{\/customform}<\/p>",';
         $actstr .= '"templateformat":"1"}';
@@ -189,7 +197,7 @@ final class rules_enrollink_test extends advanced_testcase {
         // Try to book option1 by the teacher1.
         $this->setUser($teacher1);
         singleton_service::destroy_user($teacher1->id);
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $teacher1->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $teacher1->id);
         $this->assertEquals(MOD_BOOKING_BO_COND_JSON_CUSTOMFORM, $id);
 
         $price = price::get_price('option', $settings->id);
@@ -234,13 +242,13 @@ final class rules_enrollink_test extends advanced_testcase {
         $option = singleton_service::get_instance_of_booking_option($settings->cmid, $settings->id);
         $option->user_submit_response($teacher1, 0, 0, 0, MOD_BOOKING_VERIFIED);
         // Teacher1 should be booked now.
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $teacher1->id, true);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $teacher1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Book student1 as well (skip paynent process for him).
         $option->user_submit_response($student1, 0, 0, 0, MOD_BOOKING_VERIFIED);
         // Teacher1 should be booked now.
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $student1->id, true);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Get messages.
@@ -362,20 +370,15 @@ final class rules_enrollink_test extends advanced_testcase {
         // Validate "nomoreseats" enrollment status and remainaing free places.
         $this->assertEquals(MOD_BOOKING_AUTOENROL_STATUS_NO_MORE_SEATS, $info2);
         $this->assertEquals(0, $enrollink->free_places_left());
-
-        // Mandatory to deal with static variable in the booking_rules.
-        rules_info::$rulestoexecute = [];
-        booking_rules::$rules = [];
-        enrollink::destroy_instances();
     }
 
     /**
      * Test rule on answer and option being cancelled.
      *
      * @covers \mod_booking\event\enrollink_triggered
-     * @covers \mod_booking\booking_rules\rules\rule_react_on_event->execute
-     * @covers \mod_booking\booking_rules\conditions\select_student_in_bo->execute
-     * @covers \mod_booking\booking_rules\actions\send_mail->execute
+     * @covers \mod_booking\booking_rules\rules\rule_react_on_event::execute
+     * @covers \mod_booking\booking_rules\conditions\select_student_in_bo::execute
+     * @covers \mod_booking\booking_rules\actions\send_mail::execute
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -410,7 +413,7 @@ final class rules_enrollink_test extends advanced_testcase {
         $this->getDataGenerator()->enrol_user($teacher1->id, $course->id, 'editingteacher');
         $this->getDataGenerator()->enrol_user($student1->id, $course->id, 'student');
 
-        /** @var local_shopping_cart_generator $plugingenerator */
+        /** @var \local_shopping_cart_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('local_shopping_cart');
         $usercreditdata = [
             'userid' => $teacher1->id,
@@ -419,11 +422,11 @@ final class rules_enrollink_test extends advanced_testcase {
         ];
         $ucredit = $plugingenerator->create_user_credit($usercreditdata);
 
-        /** @var mod_booking_generator $plugingenerator */
+        /** @var \mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
 
         // Create booking rule - "bookinganswer_cancelled".
-        $actstr = '{"subject":"Enrollinksubj",';
+        $actstr = '{"sendical":0,"sendicalcreateorcancel":"","subject":"Enrollinksubj",';
         $actstr .= '"template":';
         $actstr .= '"<p>{enrollink}<\/p><p>{qrenrollink}<\/p><p>{#customform}<\/p><p>{customform}<\/p><p>{\/customform}<\/p>",';
         $actstr .= '"templateformat":"1"}';
@@ -493,7 +496,7 @@ final class rules_enrollink_test extends advanced_testcase {
         // Try to book option1 by the teacher1.
         $this->setUser($teacher1);
         singleton_service::destroy_user($teacher1->id);
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $teacher1->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $teacher1->id);
         $this->assertEquals(MOD_BOOKING_BO_COND_JSON_CUSTOMFORM, $id);
 
         $price = price::get_price('option', $settings->id);
@@ -514,7 +517,7 @@ final class rules_enrollink_test extends advanced_testcase {
         $this->assertEquals(75, $price["price"]);
 
         $result = booking_bookit::bookit('option', $settings->id, $teacher1->id);
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $teacher1->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $teacher1->id);
         $this->assertEquals(MOD_BOOKING_BO_COND_ONWAITINGLIST, $id);
 
         // Admin confirms the users booking.
@@ -530,7 +533,7 @@ final class rules_enrollink_test extends advanced_testcase {
             MOD_BOOKING_BO_SUBMIT_STATUS_CONFIRMATION,
             MOD_BOOKING_VERIFIED
         );
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $teacher1->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $teacher1->id);
         $this->assertEquals(MOD_BOOKING_BO_COND_PRICEISSET, $id);
         // User buying the bundle.
         $option->user_submit_response(
@@ -540,13 +543,13 @@ final class rules_enrollink_test extends advanced_testcase {
             MOD_BOOKING_BO_SUBMIT_STATUS_DEFAULT,
             MOD_BOOKING_VERIFIED
         );
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $teacher1->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $teacher1->id);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Student1 also buys a bundle (skip payment process for him).
         $option->user_submit_response($student1, 0, 0, MOD_BOOKING_BO_SUBMIT_STATUS_CONFIRMATION, MOD_BOOKING_VERIFIED);
         $option->user_submit_response($student1, 0, 0, 0, MOD_BOOKING_VERIFIED);
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $student1->id, true);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Get messages.
@@ -658,14 +661,14 @@ final class rules_enrollink_test extends advanced_testcase {
         $this->setAdminUser();
         $option->user_submit_response($student2, 0, 0, MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL, MOD_BOOKING_VERIFIED);
         $this->assertEquals(1, $enrollink->free_places_left());
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $student2->id, true);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Proceed with enrolling of student4.
         $this->setUser($student4);
         $info1 = $enrollink->enrolment_blocking();
         $this->assertEmpty($info1);
-        $info2 = $enrollink->enrol_user($USER->id);
+        $info2 = $enrollink->enrol_user($student4->id);
         $courselink = $enrollink->get_courselink_url();
         // Validate enrollment status and remainaing free places.
         $this->assertEquals(MOD_BOOKING_AUTOENROL_STATUS_WAITINGLIST, $info2);
@@ -676,7 +679,7 @@ final class rules_enrollink_test extends advanced_testcase {
         $this->setAdminUser();
         $option->user_submit_response($student3, 0, 0, MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL, MOD_BOOKING_VERIFIED);
         $this->assertEquals(0, $enrollink->free_places_left());
-        list($id, $isavailable, $description) = $boinfo->is_available($settings->id, $student3->id, true);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student3->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
         // Proceed with enrolling of student5 - no more seats.
@@ -688,10 +691,6 @@ final class rules_enrollink_test extends advanced_testcase {
         $this->assertEquals(MOD_BOOKING_AUTOENROL_STATUS_NO_MORE_SEATS, $info2);
         $this->assertEquals(0, $enrollink->free_places_left());
         // User Student4 remains on the waitinglist.
-
-        // Mandatory to deal with static variable in the booking_rules.
-        rules_info::$rulestoexecute = [];
-        booking_rules::$rules = [];
     }
 
     /**

@@ -2831,11 +2831,11 @@ function xmldb_booking_upgrade($oldversion) {
     }
 
     if ($oldversion < 2020071300) {
-        // Define field autcractive to be added to booking.
+        // Define field customtemplateid to be added to booking.
         $table = new xmldb_table('booking');
         $field = new xmldb_field('customtemplateid', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'showviews');
 
-        // Conditionally launch add field autcractive.
+        // Conditionally launch add field customtemplateid.
         if (!$dbman->field_exists($table, $field)) {
             $dbman->add_field($table, $field);
         }
@@ -3193,10 +3193,19 @@ function xmldb_booking_upgrade($oldversion) {
 
         // Adding fields to table.
         $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
-        $table->add_field('optionid', XMLDB_TYPE_INTEGER, '10', null, null, null, '0', 'id');
-        $table->add_field('pricecategoryidentifier', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, 'optionid');
-        $table->add_field('price', XMLDB_TYPE_NUMBER, '10, 2', null, null, null, '0', 'pricecategoryidentifier');
-        $table->add_field('currency', XMLDB_TYPE_CHAR, '10', null, null, null, '', 'price');
+        $table->add_field('optionid', XMLDB_TYPE_INTEGER, '10', null, null, null, '0', new xmldb_field('id'));
+        $table->add_field(
+            'pricecategoryidentifier',
+            XMLDB_TYPE_CHAR,
+            '255',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            null,
+            new xmldb_field('optionid')
+        );
+        $table->add_field('price', XMLDB_TYPE_NUMBER, '10, 2', null, null, null, '0', new xmldb_field('pricecategoryidentifier'));
+        $table->add_field('currency', XMLDB_TYPE_CHAR, '10', null, null, null, '', new xmldb_field('price'));
 
         // Adding keys to table.
         $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
@@ -3216,11 +3225,11 @@ function xmldb_booking_upgrade($oldversion) {
 
         // Adding fields to table.
         $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null, null);
-        $table->add_field('ordernum', XMLDB_TYPE_INTEGER, '2', null, XMLDB_NOTNULL, null, '0', 'id');
-        $table->add_field('identifier', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, 'ordernum');
-        $table->add_field('name', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, 'identifier');
-        $table->add_field('defaultvalue', XMLDB_TYPE_NUMBER, '10, 2', null, null, null, '0', 'name');
-        $table->add_field('disabled', XMLDB_TYPE_INTEGER, '1', null, null, null, '0', 'defaultvalue');
+        $table->add_field('ordernum', XMLDB_TYPE_INTEGER, '2', null, XMLDB_NOTNULL, null, '0', new xmldb_field('id'));
+        $table->add_field('identifier', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, new xmldb_field('ordernum'));
+        $table->add_field('name', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, new xmldb_field('identifier'));
+        $table->add_field('defaultvalue', XMLDB_TYPE_NUMBER, '10, 2', null, null, null, '0', new xmldb_field('name'));
+        $table->add_field('disabled', XMLDB_TYPE_INTEGER, '1', null, null, null, '0', new xmldb_field('defaultvalue'));
 
         // Adding keys to table.
         $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
@@ -3240,10 +3249,10 @@ function xmldb_booking_upgrade($oldversion) {
 
         // Adding fields to table.
         $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null, null);
-        $table->add_field('identifier', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, 'id');
-        $table->add_field('name', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, 'identifier');
-        $table->add_field('startdate', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'name');
-        $table->add_field('enddate', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'startdate');
+        $table->add_field('identifier', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, new xmldb_field('id'));
+        $table->add_field('name', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, new xmldb_field('identifier'));
+        $table->add_field('startdate', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', new xmldb_field('name'));
+        $table->add_field('enddate', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', new xmldb_field('startdate'));
 
         // Adding keys to table.
         $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
@@ -3355,10 +3364,10 @@ function xmldb_booking_upgrade($oldversion) {
 
         // Adding fields to table.
         $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null, null);
-        $table->add_field('semesteridentifier', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, 'id');
-        $table->add_field('name', XMLDB_TYPE_CHAR, '255', null, null, null, null, 'semesteridentifier');
-        $table->add_field('startdate', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'name');
-        $table->add_field('enddate', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'startdate');
+        $table->add_field('semesteridentifier', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null, new xmldb_field('id'));
+        $table->add_field('name', XMLDB_TYPE_CHAR, '255', null, null, null, null, new xmldb_field('semesteridentifier'));
+        $table->add_field('startdate', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', new xmldb_field('name'));
+        $table->add_field('enddate', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', new xmldb_field('startdate'));
 
         // Adding keys to table.
         $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
@@ -4860,6 +4869,8 @@ function xmldb_booking_upgrade($oldversion) {
     }
 
     if ($oldversion < 2025022601) {
+        /* For some reason, in some versions this field was not added.
+        So we do it again. */
         // Define field places to be added to booking_answers.
         $table = new xmldb_table('booking_answers');
         $field = new xmldb_field('places', XMLDB_TYPE_INTEGER, '10', null, null, null, 1, 'status');
@@ -4873,6 +4884,238 @@ function xmldb_booking_upgrade($oldversion) {
 
         // Booking savepoint reached.
         upgrade_mod_savepoint(true, 2025022601, 'booking');
+    }
+
+    if ($oldversion < 2025022800) {
+        /* For some reason, in some versions these fields were not added.
+        So we do it again. */
+        // Define field id to be added to booking_rules.
+        $table = new xmldb_table('booking_rules');
+        $field = new xmldb_field('useastemplate', XMLDB_TYPE_INTEGER, '10', null, null, null, '0', 'eventname');
+
+        // Conditionally launch add field id.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Changing precision of fields pollurlteachers & pollurl on table booking_options to (1000).
+        $table1 = new xmldb_table('booking_options');
+        $field1 = new xmldb_field('pollurl', XMLDB_TYPE_CHAR, '1000');
+        $field2 = new xmldb_field('pollurlteachers', XMLDB_TYPE_CHAR, '1000');
+
+        // Launch change of precision for fields pollurlteachers & pollurl.
+        $dbman->change_field_type($table1, $field1);
+        $dbman->change_field_type($table1, $field2);
+
+        // Changing precision of fields pollurlteachers & pollurl on table booking_options to (1000).
+        $table2 = new xmldb_table('booking');
+        $field3 = new xmldb_field('pollurl', XMLDB_TYPE_CHAR, '1000');
+        $field4 = new xmldb_field('pollurlteachers', XMLDB_TYPE_CHAR, '1000');
+
+        // Launch change of precision for fields pollurlteachers & pollurl.
+        $dbman->change_field_type($table2, $field3);
+        $dbman->change_field_type($table2, $field4);
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025022800, 'booking');
+    }
+    if ($oldversion < 2025031100) {
+        // Define table booking_history to be created.
+        $table = new xmldb_table('booking_history');
+
+        // Adding fields to table booking_history.
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('bookingid', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('optionid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('answerid', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('status', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('usermodified', XMLDB_TYPE_INTEGER, '10', null, null, null, null);
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+
+        // Adding keys to table booking_history.
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+
+        // Conditionally launch create table for booking_history.
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025031100, 'booking');
+    }
+
+    if ($oldversion < 2025031801) {
+        // Define field id to be added to booking_history.
+        $table = new xmldb_table('booking_history');
+        $field = new xmldb_field('json', XMLDB_TYPE_CHAR, '1000', null, null, null, null, 'timecreated');
+
+        // Conditionally launch add field id.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025031801, 'booking');
+    }
+
+    if ($oldversion < 2025040800) {
+        // If the default price category does not yet exist, we create it.
+        if (!$DB->record_exists('booking_pricecategories', ['identifier' => 'default'])) {
+            // Define the default price category.
+            $defaultcategory = new stdClass();
+            $defaultcategory->ordernum = 1;
+            $defaultcategory->identifier = 'default';
+            $defaultcategory->name = 'Price';
+            $defaultcategory->defaultvalue = 0.00;
+            $DB->insert_record('booking_pricecategories', $defaultcategory);
+        }
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025040800, 'booking');
+    }
+
+    if ($oldversion < 2025041700) {
+        // Define field timemadevisible to be added to booking_options.
+        $table = new xmldb_table('booking_options');
+        $field = new xmldb_field('timemadevisible', XMLDB_TYPE_INTEGER, '10', null, null, null, '0', 'invisible');
+
+        // Conditionally launch add field timemadevisible.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Define field timecreated to be added to booking_options.
+        $field = new xmldb_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'limitanswers');
+
+        // Conditionally launch add field timecreated.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // As we do not know the actual timecreated timestamps, we use the timemodified timestamps for first initialization.
+        booking_options_initialize_timecreated();
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025041700, 'booking');
+    }
+
+    if ($oldversion < 2025050200) {
+        // Changing nullability of field enablepresence on table booking to null.
+        $table = new xmldb_table('booking');
+        $field = new xmldb_field('enablepresence', XMLDB_TYPE_INTEGER, '2', null, null, null, '0', 'daystonotify2');
+
+        // Launch change of nullability for field enablepresence.
+        $dbman->change_field_notnull($table, $field);
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025050200, 'booking');
+    }
+
+    if ($oldversion < 2025050701) {
+        // Define field competencies to be added to booking_options.
+        $table = new xmldb_table('booking_options');
+        $field = new xmldb_field('competencies', XMLDB_TYPE_CHAR, '256', null, null, null, null, 'sqlfilter');
+
+        // Conditionally launch add field competencies.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025050701, 'booking');
+    }
+
+    if ($oldversion < 2025072400) {
+        // Changing type of field responsiblecontact on table booking_options to text.
+        $table = new xmldb_table('booking_options');
+        $field = new xmldb_field('responsiblecontact', XMLDB_TYPE_CHAR, '255');
+
+        // Launch change of type for field responsiblecontact.
+        $dbman->change_field_type($table, $field);
+        $dbman->change_field_precision($table, $field);
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025072400, 'booking');
+    }
+
+    if ($oldversion < 2025081201) {
+        global $CFG;
+        // Move ID 425 to 391 in JSON config.
+        require_once($CFG->dirroot . '/mod/booking/db/upgradelib.php');
+        booking_upgrade_change_id_425_to_391();
+
+        // Upgrade savepoint.
+        upgrade_mod_savepoint(true, 2025081201, 'booking');
+    }
+
+    if ($oldversion < 2025100101) {
+        // Define field timebooked to be added to booking_answers.
+        $table = new xmldb_table('booking_answers');
+        $field = new xmldb_field('timebooked', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'json');
+
+        // Conditionally launch add field timebooked.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025100101, 'booking');
+    }
+    if ($oldversion < 2025100201) { // Update the version number to the next one in your sequence.
+        // Define field toporientation to be added to the booking table.
+        $table = new xmldb_table('booking');
+        $field = new xmldb_field('toporientation', XMLDB_TYPE_CHAR, '1', null, XMLDB_NOTNULL, null, 'P', 'defaultsortorder');
+
+        // Conditionally launch add field toporientation.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025100201, 'booking'); // Update to your new version number.
+    }
+
+    if ($oldversion < 2025102000) {
+        // Define field pricecategory to be added to booking_answers.
+        $table = new xmldb_table('booking_answers');
+        $field = new xmldb_field('pricecategory', XMLDB_TYPE_TEXT, null, null, null, null, null, 'timebooked');
+
+        // Conditionally launch add field pricecategory.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025102000, 'booking');
+    }
+
+    if ($oldversion < 2025111701) {
+        // Define table booking_customreport to be dropped.
+        $tablecustomreport = new xmldb_table('booking_customreport');
+
+        // Conditionally launch drop table for booking_customreport.
+        if ($dbman->table_exists($tablecustomreport)) {
+            $dbman->drop_table($tablecustomreport);
+        }
+
+        // Define field customtemplateid to be dropped from booking.
+        $tablebooking = new xmldb_table('booking');
+
+        $customtemplateid = new xmldb_field('customtemplateid', XMLDB_TYPE_INTEGER, '10');
+        // Conditionally drop field customtemplateid.
+        if ($dbman->field_exists($tablebooking, $customtemplateid)) {
+            $dbman->drop_field($tablebooking, $customtemplateid);
+        }
+
+        // If the old field containing the typo is still there, we drop it too.
+        $customteplateid = new xmldb_field('customteplateid', XMLDB_TYPE_INTEGER, '10');
+        // Conditionally drop field customteplateid.
+        if ($dbman->field_exists($tablebooking, $customteplateid)) {
+            $dbman->drop_field($tablebooking, $customteplateid);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025111701, 'booking');
     }
 
     return true;

@@ -42,7 +42,6 @@ use moodle_exception;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class customfields extends field_base {
-
     /**
      * This ID is used for sorting execution.
      * @var int
@@ -94,7 +93,8 @@ class customfields extends field_base {
         stdClass &$formdata,
         stdClass &$newoption,
         int $updateparam,
-        $returnvalue = null): array {
+        $returnvalue = null
+    ): array {
 
         // No need to do anything here.
         return [];
@@ -117,7 +117,7 @@ class customfields extends field_base {
         $applyheader = true
     ) {
 
-        $optionid = $formdata['id'] ?? $formdata['optionid'];
+        $optionid = $formdata['id'] ?? $formdata['optionid'] ?? 0;
 
         if (!empty($formdata['cmid'])) {
             $context = context_module::instance($formdata['cmid']);
@@ -150,10 +150,8 @@ class customfields extends field_base {
      * @return void
      */
     public static function validation(array $data, array $files, array &$errors) {
-
         $cfhandler = booking_handler::create();
         $errors = array_merge($errors, $cfhandler->instance_form_validation($data, $files));
-
     }
 
     /**
@@ -202,15 +200,26 @@ class customfields extends field_base {
                 // Only report that there was change in the section.
                 // Can be extended when needed.
                 $fieldname = $data->get_field()->get('name') ?? $key;
-                $oldvalue = is_string($oldvalue) ? format_string($oldvalue) : $oldvalue;
-                $newvalue = is_string($newvalue) ? format_string($newvalue) : $newvalue;
-                $changes[$key] = [
-                    'changes' => [
-                        'fieldname' => 'customfields',
-                        'oldvalue' => $fieldname . ' : ' . $oldvalue,
-                        'newvalue' => $fieldname . ' : ' . $newvalue,
-                    ],
-                ];
+                if (is_string($oldvalue)) {
+                    $oldvalue = format_string($oldvalue);
+                } else if (is_array($oldvalue)) {
+                    $oldvalue = implode(',', $oldvalue);
+                }
+                if (is_string($newvalue)) {
+                    $newvalue = format_string($newvalue);
+                } else if (is_array($newvalue)) {
+                    $newvalue = implode(',', $newvalue);
+                }
+                if ($oldvalue !== $newvalue) {
+                    $changes[$key] = [
+                        'changes' => [
+                            'fieldname' => 'customfields',
+                            'oldvalue' => $fieldname . ' : ' . $oldvalue,
+                            'newvalue' => $fieldname . ' : ' . $newvalue,
+                            'formkey' => 'customfield_' . $fieldname,
+                        ],
+                    ];
+                }
             }
         }
         // Changes can apply to multiple fields.

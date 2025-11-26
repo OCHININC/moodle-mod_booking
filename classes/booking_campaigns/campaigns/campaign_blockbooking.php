@@ -17,12 +17,13 @@
 namespace mod_booking\booking_campaigns\campaigns;
 
 use context_system;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_campaigns\booking_campaign;
 use mod_booking\booking_campaigns\campaigns_info;
 use mod_booking\booking_context_helper;
 use mod_booking\booking_option_settings;
 use mod_booking\customfield\booking_handler;
+use mod_booking\option\time_handler;
 use mod_booking\singleton_service;
 use mod_booking\task\purge_campaign_caches;
 use MoodleQuickForm;
@@ -40,7 +41,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license     http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class campaign_blockbooking implements booking_campaign {
-
     /** @var int $id */
     public $id = 0;
 
@@ -147,12 +147,24 @@ class campaign_blockbooking implements booking_campaign {
 
         campaigns_info::add_customfields_to_form($mform, $ajaxformdata);
 
-        $mform->addElement('date_time_selector', 'starttime', get_string('campaignstart', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'starttime',
+            get_string('campaignstart', 'mod_booking'),
+            time_handler::set_timeintervall()
+        );
         $mform->setType('starttime', PARAM_INT);
+        $mform->setDefault("starttime", time_handler::prettytime(time()));
         $mform->addHelpButton('starttime', 'campaignstart', 'mod_booking');
 
-        $mform->addElement('date_time_selector', 'endtime', get_string('campaignend', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'endtime',
+            get_string('campaignend', 'mod_booking'),
+            time_handler::set_timeintervall(),
+        );
         $mform->setType('endtime', PARAM_INT);
+        $mform->setDefault("endtime", time_handler::prettytime(time()));
         $mform->addHelpButton('endtime', 'campaignend', 'mod_booking');
 
         // Price factor (multiplier).
@@ -175,10 +187,10 @@ class campaign_blockbooking implements booking_campaign {
             'textarea',
             'blockinglabel',
             get_string('blockinglabel', 'mod_booking'),
-            'rows="2" cols="50"');
+            'rows="2" cols="50"'
+        );
         $mform->setType('blockinglabel', PARAM_TEXT);
         $mform->addHelpButton('blockinglabel', 'blockinglabel', 'mod_booking');
-
     }
 
     /**
@@ -187,6 +199,7 @@ class campaign_blockbooking implements booking_campaign {
      * @return string
      */
     public function get_name_of_campaign_type(bool $localized = true): string {
+        // Mdlcode-disable-next-line cannot-parse-string.
         return $localized ? get_string($this->bookingcampaigntypestringid, 'mod_booking') : $this->bookingcampaigntype;
     }
 
@@ -206,16 +219,16 @@ class campaign_blockbooking implements booking_campaign {
             $jsonobject = json_decode($data->json);
         }
 
-        $jsonobject->bofieldname = $data->bofieldname;
-        $jsonobject->campaignfieldnameoperator = $data->campaignfieldnameoperator;
-        $jsonobject->fieldvalue = $data->fieldvalue;
+        $jsonobject->bofieldname = $data->bofieldname ?? '';
+        $jsonobject->campaignfieldnameoperator = $data->campaignfieldnameoperator ?? '';
+        $jsonobject->fieldvalue = $data->fieldvalue ?? '';
         $jsonobject->cpfield = $data->cpfield ?? '';
         $jsonobject->cpoperator = $data->cpoperator ?? '';
         $jsonobject->cpvalue = $data->cpvalue ?? '';
-        $jsonobject->blockoperator = $data->blockoperator;
-        $jsonobject->blockinglabel = $data->blockinglabel;
+        $jsonobject->blockoperator = $data->blockoperator ?? '';
+        $jsonobject->blockinglabel = $data->blockinglabel ?? '';
         $jsonobject->hascapability = $data->hascapability ?? '';
-        $jsonobject->percentageavailableplaces = $data->percentageavailableplaces;
+        $jsonobject->percentageavailableplaces = $data->percentageavailableplaces ?? 50.0;
         $record->json = json_encode($jsonobject);
 
         $record->name = $data->name;
@@ -331,18 +344,18 @@ class campaign_blockbooking implements booking_campaign {
         booking_context_helper::fix_booking_page_context($PAGE, $settings->cmid);
 
         $ba = singleton_service::get_instance_of_booking_answers($settings);
+        $usersonlist = $ba->get_usersonlist();
 
         $blocking = false;
 
         switch ($this->blockoperator) {
-
             case 'blockbelow':
                 $blocking = ($settings->maxanswers * $this->percentageavailableplaces * 0.01)
-                    > booking_answers::count_places($ba->usersonlist);
+                    > booking_answers::count_places($usersonlist);
                 break;
             case 'blockabove':
                 $blocking = ($settings->maxanswers * $this->percentageavailableplaces * 0.01)
-                    < booking_answers::count_places($ba->usersonlist);
+                    < booking_answers::count_places($usersonlist);
                 break;
             case 'blockalways':
                 $blocking = true;
@@ -359,7 +372,7 @@ class campaign_blockbooking implements booking_campaign {
             !empty($userid)
             && isset($this->cpfield)
             && !empty($bofieldname = $this->cpfield)
-            ) {
+        ) {
             // If there is a value, it has to match in order to block.
             $blocking = campaigns_info::check_if_profilefield_applies($this->cpvalue, $this->cpfield, $this->cpoperator, $userid);
         }
@@ -393,5 +406,13 @@ class campaign_blockbooking implements booking_campaign {
      */
     public function get_id_of_campaign(): int {
         return $this->id ?? 0;
+    }
+
+    /**
+     * Return boolean if price is user-specific.
+     * @return bool
+     */
+    public function user_specific_price(): bool {
+        return $this->userspecificprice;
     }
 }

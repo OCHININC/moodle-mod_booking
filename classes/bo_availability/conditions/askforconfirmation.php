@@ -29,8 +29,10 @@
 use context_system;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
+use mod_booking\booking_bookit;
 use mod_booking\booking_option_settings;
+use mod_booking\output\bookingoption_description;
 use mod_booking\singleton_service;
 use MoodleQuickForm;
 
@@ -102,15 +104,40 @@ class askforconfirmation implements bo_condition {
 
         // The following conditions have to be met.
         // - User must not be on waitinglist
-        // - AND: Ask for confirmation must be turned on.
+        // - AND: Always ask for confirmation must be turned on.
         // - OR: A price is set and it's fully booked already.
+        // This should not block for waitforconfirmation == 2 which means confirmation only for users already on waitinglist.
+        // Except if there are people on the waitinglist and there is a free spot...
+        // ... then with waitforconfirmation = 2, booking should be possible only on the waitinglist.
         if (
             !isset($bookinginformation['onwaitinglist'])
-            && (!empty($settings->waitforconfirmation)
-            || (!empty($settings->jsonobject->useprice))
-                && (isset($bookinginformation['notbooked']['fullybooked'])
-                && $bookinginformation['notbooked']['fullybooked'] === true
-                && ($settings->maxoverbooking > booking_answers::count_places($bookinganswer->usersonwaitinglist))))
+            && (
+                    (
+                        (
+                            ($bookinginformation['notbooked']['freeonwaitinglist'] ?? 0) == -1
+                        ||
+                            ($bookinginformation['notbooked']['freeonwaitinglist'] ?? 0) > 0
+                        )
+                        && isset($bookinginformation['notbooked']['fullybooked'])
+                        && $bookinginformation['notbooked']['fullybooked'] === true
+                    )
+                ||
+                    (
+                        $settings->waitforconfirmation == 1
+                        || (
+                            !empty($settings->jsonobject->useprice)
+                            && isset($bookinginformation['notbooked']['fullybooked'])
+                            && $bookinginformation['notbooked']['fullybooked'] === true
+                            && ($settings->maxoverbooking > $bookinginformation['notbooked']['waiting'])
+                        )
+                    )
+                ||
+                    ($settings->waitforconfirmation == 2
+                    && isset($bookinginformation['notbooked']['fullybooked'])
+                    && $bookinginformation['notbooked']['fullybooked'] === false
+                    && (!isset($bookinginformation['notbooked']['waiting'])
+                        || $bookinginformation['notbooked']['waiting'] > 0))
+            )
         ) {
             if (
                 !empty(get_config('booking', 'allowoverbooking'))
@@ -133,10 +160,10 @@ class askforconfirmation implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -181,7 +208,7 @@ class askforconfirmation implements bo_condition {
 
         $isavailable = $this->is_available($settings, $userid, $not);
 
-        $description = $this->get_description_string($isavailable, $full, $settings);
+        $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_BOOK, MOD_BOOKING_BO_BUTTON_MYBUTTON];
     }

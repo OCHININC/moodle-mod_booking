@@ -35,11 +35,13 @@ $id = required_param('id', PARAM_INT);
 $optionid = required_param('optionid', PARAM_INT);
 $uids = required_param('uids', PARAM_RAW);
 
-$url = new moodle_url('/mod/booking/sendmessage.php',
-        ['id' => $id, 'optionid' => $optionid, 'uids' => $uids]);
+$url = new moodle_url(
+    '/mod/booking/sendmessage.php',
+    ['id' => $id, 'optionid' => $optionid, 'uids' => $uids]
+);
 $PAGE->set_url($url);
 
-list($course, $cm) = get_course_and_cm_from_cmid($id);
+[$course, $cm] = get_course_and_cm_from_cmid($id);
 
 require_course_login($course, false, $cm);
 $groupmode = groups_get_activity_groupmode($cm);
@@ -104,10 +106,17 @@ function send_custom_message(int $optionid, string $subject, string $message, ar
     $bookingid = $settings->bookingid;
 
     foreach ($selecteduserids as $currentuserid) {
-
         $messagecontroller = new message_controller(
-            MOD_BOOKING_MSGCONTRPARAM_SEND_NOW, MOD_BOOKING_MSGPARAM_CUSTOM_MESSAGE, $cmid, $optionid, $currentuserid,
-            $bookingid, null, null, $subject, $message
+            MOD_BOOKING_MSGCONTRPARAM_SEND_NOW,
+            MOD_BOOKING_MSGPARAM_CUSTOM_MESSAGE,
+            $cmid,
+            $optionid,
+            $currentuserid,
+            $bookingid,
+            null,
+            null,
+            $subject,
+            $message
         );
         $messagecontroller->send_or_queue();
 
@@ -131,11 +140,11 @@ function send_custom_message(int $optionid, string $subject, string $message, ar
 
     // Check, if a bulk message has been sent.
     $answers = singleton_service::get_instance_of_booking_answers($settings);
-    $bookedusers = $answers->usersonlist;
+    $bookedusers = $answers->get_usersonlist();
     if (!empty($selecteduserids) && !empty($bookedusers)) {
         $countselected = count($selecteduserids);
         $countbooked = count($bookedusers);
-        // It's been considered as a bulk message, if it goes to at least 75% of booked users (and more than 3 users).
+        // It's been considered as a bulk message, if it goes to at least 75% of booked users (and at least 3 users).
         if ($countselected >= 3 && ($countselected / $countbooked) >= 0.75) {
             $event = custom_bulk_message_sent::create([
                 'context' => context_system::instance(),
@@ -154,5 +163,4 @@ function send_custom_message(int $optionid, string $subject, string $message, ar
             $event->trigger();
         }
     }
-
 }

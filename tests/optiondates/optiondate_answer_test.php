@@ -28,6 +28,7 @@ namespace mod_booking;
 
 use advanced_testcase;
 use mod_booking\local\optiondates\optiondate_answer;
+use tool_mocktesttime\time_mock;
 
 defined('MOODLE_INTERNAL') || die();
 global $CFG;
@@ -37,6 +38,28 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * PHPUnit test case for the class.
  */
 final class optiondate_answer_test extends advanced_testcase {
+    /**
+     * Tests set up.
+     */
+    public function setUp(): void {
+        parent::setUp();
+        $this->resetAfterTest();
+        time_mock::init();
+        time_mock::set_mock_time(strtotime('now'));
+        singleton_service::destroy_instance();
+    }
+
+    /**
+     * Mandatory clean-up after each test.
+     */
+    public function tearDown(): void {
+        global $DB;
+
+        parent::tearDown();
+        // Mandatory clean-up.
+        singleton_service::destroy_instance();
+    }
+
     /**
      * Data provider for the test.
      *
@@ -53,7 +76,8 @@ final class optiondate_answer_test extends advanced_testcase {
     /**
      * Test save_record and get_record methods.
      *
-     * @covers \mod_booking/local/optiondates/optiondate
+     * @covers \mod_booking\local\optiondates\optiondate_answer
+     *
      * @dataProvider data_provider
      * @param int $userid
      * @param int $optiondateid
@@ -89,7 +113,8 @@ final class optiondate_answer_test extends advanced_testcase {
     /**
      * Test delete_record method.
      *
-     * @covers \mod_booking/local/optiondates/optiondate
+     * @covers \mod_booking\local\optiondates\optiondate_answer
+     *
      * @dataProvider data_provider
      * @param int $userid
      * @param int $optiondateid
@@ -120,7 +145,8 @@ final class optiondate_answer_test extends advanced_testcase {
     /**
      * Test delete_record method.
      *
-     * @covers \mod_booking/local/optiondates/optiondate
+     * @covers \mod_booking\local\optiondates\optiondate_answer
+     *
      * @dataProvider data_provider
      * @param int $userid
      * @param int $optiondateid

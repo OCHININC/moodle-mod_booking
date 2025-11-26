@@ -34,7 +34,9 @@ use local_entities\entitiesrelation_handler;
 use mod_booking\customfield\optiondate_cfields;
 use mod_booking\option\dates_handler;
 use mod_booking\option\optiondate;
+use mod_booking\option\time_handler;
 use moodle_exception;
+use moodle_url;
 use MoodleQuickForm;
 use stdClass;
 
@@ -124,11 +126,26 @@ class dates {
             $mform->hideIf('semesterid', 'selflearningcourse', 'eq', 1);
             $elements[] = $element;
 
-            $element = $mform->addElement('text', 'dayofweektime', get_string('reoccurringdatestring', 'mod_booking'));
+            $element = $mform->addElement(
+                'textarea',
+                'dayofweektime',
+                get_string('reoccurringdatestring', 'mod_booking'),
+                'rows="3" cols="30"'
+            );
             $mform->addHelpButton('dayofweektime', 'reoccurringdatestring', 'mod_booking');
             $mform->setType('dayofweektime', PARAM_TEXT);
             $element->setValue($dayofweektime);
             $mform->hideIf('dayofweektime', 'selflearningcourse', 'eq', 1);
+            $elements[] = $element;
+
+            $element = $mform->addElement(
+                'static',
+                'multipledayofweektimestringshint',
+                '',
+                '<i class="fa fa-lightbulb-o" aria-hidden="true"></i>&nbsp;' .
+                get_string('multipledayofweektimestringshint', 'mod_booking')
+            );
+            $mform->hideIf('multipledayofweektimestringshint', 'selflearningcourse', 'eq', 1);
             $elements[] = $element;
 
             // Button to attach JavaScript to reload the form.
@@ -219,8 +236,8 @@ class dates {
                     ?? $defaultvalues->courseenddate;
 
                 $defaultvalues->{MOD_BOOKING_FORM_OPTIONDATEID . 0} = 0;
-                $defaultvalues->{MOD_BOOKING_FORM_COURSESTARTTIME . 0} = strtotime($starttime);
-                $defaultvalues->{MOD_BOOKING_FORM_COURSEENDTIME . 0} = strtotime($endtime);
+                $defaultvalues->{MOD_BOOKING_FORM_COURSESTARTTIME . 0} = strtotime($starttime, time());
+                $defaultvalues->{MOD_BOOKING_FORM_COURSEENDTIME . 0} = strtotime($endtime, time());
                 $defaultvalues->{MOD_BOOKING_FORM_DAYSTONOTIFY . 0} = 0;
             }
         }
@@ -271,7 +288,10 @@ class dates {
         } else if (!empty($defaultvalues->id)) {
             $settings = singleton_service::get_instance_of_booking_option_settings($defaultvalues->id);
             // Make sure, no sessions are created for self-learning courses.
-            if (empty($settings->selflearningcourse)) {
+            if (
+                empty($settings->selflearningcourse)
+                && !isset($defaultvalues->coursestarttime_1)
+            ) {
                 $sessions = $settings->sessions;
             } else {
                 $sessions = [];
@@ -341,7 +361,6 @@ class dates {
             $defaultvalues->datescounter = $datescounter;
         } else {
             // We might have clicked a delete nosubmit button.
-
             $regexkey = '/^' . MOD_BOOKING_FORM_DELETEDATE . '/';
             $datestodelete = preg_grep($regexkey, array_keys((array)$defaultvalues));
 
@@ -437,7 +456,7 @@ class dates {
 
         $counter = 1;
         $dates = [];
-        $highesindex = 1;
+        $highestindex = 1;
 
         if (!$optiondates = preg_grep('/^optiondateid_/', array_keys($formvalues))) {
             // For performance.
@@ -455,7 +474,7 @@ class dates {
                     'entityarea' => 0,
                     'customfields' => [],
                 ];
-                $highesindex = 0;
+                $highestindex = 0;
             } else {
                 return [[], 0];
             }
@@ -514,18 +533,18 @@ class dates {
                     'optiondateid' => $formvalues[MOD_BOOKING_FORM_OPTIONDATEID . $counter],
                     'coursestarttime' => $coursestarttime,
                     'courseendtime' => $courseendtime,
-                    'daystonotify' => $formvalues[MOD_BOOKING_FORM_DAYSTONOTIFY . $counter],
+                    'daystonotify' => $formvalues[MOD_BOOKING_FORM_DAYSTONOTIFY . $counter] ?? 0,
                     'entityid' => $entityid,
                     'entityarea' => $entityarea,
                     'customfields' => $cffields,
                 ];
-                $highesindex = $highesindex < $counter ? $counter : $highesindex;
+                $highestindex = $highestindex < $counter ? $counter : $highestindex;
             }
         }
 
         usort($dates, fn($a, $b) => $a['coursestarttime'] < $b['coursestarttime'] ? -1 : 1);
 
-        return [array_values($dates), $highesindex];
+        return [array_values($dates), $highestindex];
     }
 
     /**
@@ -538,7 +557,7 @@ class dates {
     public static function save_optiondates_from_form(stdClass $formdata, stdClass &$option): array {
 
         $settings = singleton_service::get_instance_of_booking_option_settings($option->id);
-        [$newoptiondates, $highesindex] = self::get_list_of_submitted_dates((array)$formdata);
+        [$newoptiondates, $highestindex] = self::get_list_of_submitted_dates((array)$formdata);
         $olddates = $settings->sessions;
         // For the moment we don't save entities in old (to be deleted) dates since it's not considered as an important information.
         $memory = $olddates;
@@ -595,7 +614,7 @@ class dates {
         $datestosave = array_merge($datestosave, $datestoupdate);
         foreach ($datestosave as $date) {
             $optiondate = optiondate::save(
-                (int)$date['optiondateid'] ?? 0,
+                (int)($date['optiondateid'] ?? 0),
                 (int)$option->id,
                 (int)$date['coursestarttime'],
                 (int)$date['courseendtime'],
@@ -604,7 +623,7 @@ class dates {
                 0,
                 '',
                 0,
-                (int)$date['entityid'] ?? 0,
+                (int)($date['entityid'] ?? 0),
                 $date['customfields'] ?? []
             );
         }
@@ -644,6 +663,7 @@ class dates {
      * @param array $elements
      * @param array $date
      * @param bool $expanded
+     * @param array $formdata optional
      * @return void
      * @throws coding_exception
      */
@@ -651,7 +671,8 @@ class dates {
         MoodleQuickForm &$mform,
         array &$elements,
         array $date,
-        bool $expanded = false
+        bool $expanded = false,
+        array $formdata = []
     ) {
 
         global $OUTPUT;
@@ -689,7 +710,8 @@ class dates {
         $element = $mform->addElement(
             'date_time_selector',
             MOD_BOOKING_FORM_COURSESTARTTIME . $idx,
-            get_string("coursestarttime", "booking")
+            get_string("coursestarttime", "booking"),
+            time_handler::set_timeintervall(),
         );
         $mform->setType(MOD_BOOKING_FORM_COURSESTARTTIME . $idx, PARAM_INT);
         $time = self::timestamp_to_array($starttime);
@@ -699,14 +721,16 @@ class dates {
         $element = $mform->addElement(
             'date_time_selector',
             MOD_BOOKING_FORM_COURSEENDTIME . $idx,
-            get_string("courseendtime", "booking")
+            get_string("courseendtime", "booking"),
+            time_handler::set_timeintervall(),
         );
         $mform->setType(MOD_BOOKING_FORM_COURSEENDTIME . $idx, PARAM_INT);
         $time = self::timestamp_to_array($endtime);
         $element->setValue($time);
         $elements[] = $element;
 
-        if (!empty(get_config('booking', 'uselegacymailtemplates'))) {
+        if (get_config('booking', 'uselegacymailtemplates')) {
+            // Todo: Remove this in the future when mail template support is removed.
             $element = $mform->addElement(
                 'text',
                 MOD_BOOKING_FORM_DAYSTONOTIFY . $idx,
@@ -717,6 +741,47 @@ class dates {
             $element->setValue($date['daystonotify']);
             $mform->addHelpButton(MOD_BOOKING_FORM_DAYSTONOTIFY . $idx, 'daystonotifysession', 'mod_booking');
             $elements[] = $element;
+        } else {
+            // This only applies, if we have session reminders in Booking Rules.
+            // This is the new behavior without legacay mail templates.
+            // If we have no session reminders in Booking Rules, we show a hint how to create them.
+            $linktobookingrules = new moodle_url('/mod/booking/edit_rules.php');
+            if (self::session_reminder_rule_exists($formdata["cmid"] ?? 0)) {
+                $element = $mform->addElement(
+                    'static',
+                    'sessionremindersruleexists',
+                    '',
+                    '<i class="fa fa-tasks" aria-hidden="true"></i>&nbsp;' .
+                    get_string('sessionremindersruleexists', 'mod_booking')
+                );
+                $elements[] = $element;
+
+                // The days to notify from the rule can be overriden by each date.
+                // If the value is 0, we use the number of days from the rule.
+                $numberofdaysarray = booking::get_array_of_days_before_and_after(1, 30);
+                $numberofdaysarray[0] = get_string('daystonotifysessionrulenooverride', 'mod_booking');
+                ksort($numberofdaysarray); // We want to have 0 (no override) at the top.
+
+                $element = $mform->addElement(
+                    'select',
+                    MOD_BOOKING_FORM_DAYSTONOTIFY . $idx,
+                    get_string('daystonotifysessionruleoverride', 'mod_booking'),
+                    $numberofdaysarray
+                );
+                $mform->setType(MOD_BOOKING_FORM_DAYSTONOTIFY . $idx, PARAM_INT);
+                $element->setValue($date['daystonotify']);
+                $mform->addHelpButton(MOD_BOOKING_FORM_DAYSTONOTIFY . $idx, 'daystonotifysessionruleoverride', 'mod_booking');
+                $elements[] = $element;
+            } else {
+                $element = $mform->addElement(
+                    'static',
+                    'sessionremindershint',
+                    '',
+                    '<i class="fa fa-lightbulb-o" aria-hidden="true"></i>&nbsp;' .
+                    get_string('sessionremindershint', 'mod_booking', $linktobookingrules)
+                );
+                $elements[] = $element;
+            }
         }
 
         // Add entities.
@@ -794,7 +859,7 @@ class dates {
                 $editted = true;
             }
 
-            self::add_date_as_collapsible($mform, $elements, $date, $editted);
+            self::add_date_as_collapsible($mform, $elements, $date, $editted, $formdata);
         }
 
         // Button to attach JavaScript to reload the form.
@@ -868,5 +933,37 @@ class dates {
         ];
 
         return $datearray;
+    }
+
+    /**
+     * Helper function to check if a session reminder rules already exists globally or for this instance.
+     * @param int $cmid course module id of the booking instance
+     * @return bool true if a session reminder rule exists in system context (globally) or for the given instance
+     */
+    private static function session_reminder_rule_exists(int $cmid): bool {
+        global $DB;
+        if (
+            $DB->get_records_sql(
+                "SELECT br.*, ctx.contextlevel, ctx.instanceid
+                   FROM {booking_rules} br
+                   JOIN {context} ctx
+                     ON ctx.id = br.contextid
+                  WHERE br.rulename = 'rule_daysbefore'
+                    AND {$DB->sql_like('br.rulejson', ':optiondatestarttime', true)}
+                    AND (
+                        (ctx.contextlevel = :systemcontext AND ctx.instanceid = 0)
+                        OR (ctx.contextlevel = :modulecontext AND ctx.instanceid = :cmid)
+                    )",
+                [
+                    'optiondatestarttime' => '%optiondatestarttime%',
+                    'systemcontext' => CONTEXT_SYSTEM,
+                    'modulecontext' => CONTEXT_MODULE,
+                    'cmid' => $cmid,
+                ]
+            )
+        ) {
+            return true;
+        }
+        return false;
     }
 }

@@ -25,6 +25,8 @@
  */
 defined('MOODLE_INTERNAL') || die();
 
+use mod_booking\plugininfo\bookingextension_interface;
+
 $functions = [
     'mod_booking_bookit' => [
         'classname' => 'mod_booking\external\bookit',

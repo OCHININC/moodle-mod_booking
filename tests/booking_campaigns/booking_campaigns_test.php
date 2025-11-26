@@ -33,6 +33,7 @@ use context_system;
 use mod_booking\bo_availability\bo_info;
 use mod_booking\booking_campaigns\campaigns_info;
 use stdClass;
+use tool_mocktesttime\time_mock;
 
 defined('MOODLE_INTERNAL') || die();
 global $CFG;
@@ -47,13 +48,15 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 final class booking_campaigns_test extends advanced_testcase {
-
     /**
      * Tests set up.
      */
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest(true);
+        time_mock::init();
+        time_mock::set_mock_time(strtotime('now'));
+        singleton_service::destroy_instance();
     }
 
     /**
@@ -63,14 +66,14 @@ final class booking_campaigns_test extends advanced_testcase {
         parent::tearDown();
         // Mandatory clean-up.
         singleton_service::reset_campaigns();
-        singleton_service::get_instance()->users = [];
-        singleton_service::get_instance()->bookinganswers = [];
+        singleton_service::destroy_instance();
     }
 
     /**
      * Test campaign blockbooking.
      *
-     * @covers \condition\campaign_blockbooking::is_available
+     * @covers \mod_booking\bo_availability\conditions\campaign_blockbooking::is_available
+     *
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -138,8 +141,8 @@ final class booking_campaigns_test extends advanced_testcase {
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
 
-        // Create 1st blocking campaing: with "above" condition.
-        $campaingdata1 = (object) [
+        // Create 1st blocking campaign: with "above" condition.
+        $campaigndata1 = (object) [
             'bofieldname' => 'spt1',
             'fieldvalue' => 'tennis',
             'campaignfieldnameoperator' => '=',
@@ -151,19 +154,19 @@ final class booking_campaigns_test extends advanced_testcase {
             'hascapability' => null,
             'percentageavailableplaces' => 30,
         ];
-        $campaing1 = [
+        $campaign1 = [
             'name' => 'bloking_above30',
             'type' => 1,
             'starttime' => strtotime('yesterday'),
             'endtime' => strtotime('now + 1 month'),
             'pricefactor' => 1,
             'limitfactor' => 1,
-            'json' => json_encode($campaingdata1),
+            'json' => json_encode($campaigndata1),
         ];
-        $plugingenerator->create_campaign($campaing1);
+        $plugingenerator->create_campaign($campaign1);
 
-        // Create 2nd blocking campaing: with "below" condition.
-        $campaingdata2 = (object) [
+        // Create 2nd blocking campaign: with "below" condition.
+        $campaigndata2 = (object) [
             'bofieldname' => 'spt1',
             'fieldvalue' => 'yoga',
             'campaignfieldnameoperator' => '=',
@@ -175,19 +178,19 @@ final class booking_campaigns_test extends advanced_testcase {
             'hascapability' => null,
             'percentageavailableplaces' => 30,
         ];
-        $campaing2 = [
+        $campaign2 = [
             'name' => 'bloking_below30',
             'type' => 1,
             'starttime' => strtotime('yesterday'),
             'endtime' => strtotime('now + 1 month'),
             'pricefactor' => 1,
             'limitfactor' => 1,
-            'json' => json_encode($campaingdata2),
+            'json' => json_encode($campaigndata2),
         ];
-        $plugingenerator->create_campaign($campaing2);
+        $plugingenerator->create_campaign($campaign2);
 
-        // Create 3rd blocking campaing: with multiple custom user profile fields and without bofield.
-        $campaingdata3 = (object) [
+        // Create 3rd blocking campaign: with multiple custom user profile fields and without bofield.
+        $campaigndata3 = (object) [
             'bofieldname' => '0',
             'campaignfieldnameoperator' => null,
             'fieldvalue' => '',
@@ -199,17 +202,17 @@ final class booking_campaigns_test extends advanced_testcase {
             'hascapability' => "",
             'percentageavailableplaces' => 50,
         ];
-        $campaing3 = [
+        $campaign3 = [
             'name' => 'multiple_user_fields',
             'type' => 1,
             'starttime' => strtotime('yesterday'),
             'endtime' => strtotime('now + 1 month'),
             'pricefactor' => 1,
             'limitfactor' => 1,
-            'json' => json_encode($campaingdata3),
+            'json' => json_encode($campaigndata3),
         ];
 
-        $plugingenerator->create_campaign($campaing3);
+        $plugingenerator->create_campaign($campaign3);
 
         // Create 1st booking option.
         $record = new stdClass();
@@ -342,24 +345,24 @@ final class booking_campaigns_test extends advanced_testcase {
         $campaigns = singleton_service::get_all_campaigns();
         foreach ($campaigns as $campaignobj) {
             switch ($campaignobj->name) {
-                case $campaing1['name']:
-                    $campaing1['id'] = $campaignobj->id;
+                case $campaign1['name']:
+                    $campaign1['id'] = $campaignobj->id;
                     break;
-                case $campaing2['name']:
-                    $campaing2['id'] = $campaignobj->id;
+                case $campaign2['name']:
+                    $campaign2['id'] = $campaignobj->id;
                     break;
             }
         }
-        // Adjust 1st blocking campaing: set to future only.
-        $campaing1['name'] = 'bloking_above30-future';
-        $campaing1['starttime'] = strtotime('now + 2 day');
-        $plugingenerator->create_campaign($campaing1);
-        // Adjust 2nd blocking campaing: with "below" condition.
-        $campaingdata2->blockinglabel = 'block_below_50';
-        $campaingdata2->percentageavailableplaces = 50;
-        $campaing2['json'] = json_encode($campaingdata2);
-        $campaing2['name'] = 'bloking_below50';
-        $plugingenerator->create_campaign($campaing2);
+        // Adjust 1st blocking campaign: set to future only.
+        $campaign1['name'] = 'bloking_above30-future';
+        $campaign1['starttime'] = strtotime('now + 2 day');
+        $plugingenerator->create_campaign($campaign1);
+        // Adjust 2nd blocking campaign: with "below" condition.
+        $campaigndata2->blockinglabel = 'block_below_50';
+        $campaigndata2->percentageavailableplaces = 50;
+        $campaign2['json'] = json_encode($campaigndata2);
+        $campaign2['name'] = 'bloking_below50';
+        $plugingenerator->create_campaign($campaign2);
 
         // Reset caches (campaigns and options).
         singleton_service::reset_campaigns();
@@ -446,7 +449,8 @@ final class booking_campaigns_test extends advanced_testcase {
     /**
      * Test campaign blockbooking.
      *
-     * @covers \condition\campaign_blockbooking::is_available
+     * @covers \mod_booking\bo_availability\conditions\campaign_blockbooking::is_available
+     *
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -588,8 +592,8 @@ final class booking_campaigns_test extends advanced_testcase {
         $option3 = $plugingenerator->create_option($record);
         singleton_service::destroy_booking_option_singleton($option3->id); // Mandatory there.
 
-        // Create blocking campaing.
-        $campaingdata1 = (object) [
+        // Create blocking campaign.
+        $campaigndata1 = (object) [
             'bofieldname' => 'bcustom1',
             'fieldvalue' => 'exclude',
             'campaignfieldnameoperator' => '!~', // Does not contains!
@@ -601,20 +605,20 @@ final class booking_campaigns_test extends advanced_testcase {
             'hascapability' => null,
             'percentageavailableplaces' => 50,
         ];
-        $campaing1 = new stdClass();
-        $campaing1 = [
+        $campaign1 = new stdClass();
+        $campaign1 = [
             'name' => 'bloking1',
             'type' => 1,
             'starttime' => strtotime('yesterday'),
             'endtime' => strtotime('now + 1 week'),
             'pricefactor' => 1,
             'limitfactor' => 1,
-            'json' => json_encode($campaingdata1),
+            'json' => json_encode($campaigndata1),
         ];
-        $plugingenerator->create_campaign($campaing1);
+        $plugingenerator->create_campaign($campaign1);
 
-        // Create 2nd blocking campaing: with multiple custom user profile fields and without bofield.
-        $campaingdata2 = (object) [
+        // Create 2nd blocking campaign: with multiple custom user profile fields and without bofield.
+        $campaigndata2 = (object) [
             'bofieldname' => '0',
             'campaignfieldnameoperator' => null,
             'fieldvalue' => '',
@@ -626,16 +630,16 @@ final class booking_campaigns_test extends advanced_testcase {
             'hascapability' => "",
             'percentageavailableplaces' => 50,
         ];
-        $campaing2 = [
+        $campaign2 = [
             'name' => 'multiple_user_fields',
             'type' => 1,
             'starttime' => strtotime('yesterday'),
             'endtime' => strtotime('now + 1 month'),
             'pricefactor' => 1,
             'limitfactor' => 1,
-            'json' => json_encode($campaingdata2),
+            'json' => json_encode($campaigndata2),
         ];
-        $plugingenerator->create_campaign($campaing2);
+        $plugingenerator->create_campaign($campaign2);
 
         $settings1 = singleton_service::get_instance_of_booking_option_settings($option1->id);
         $optionobj1 = singleton_service::get_instance_of_booking_option($settings1->cmid, $option1->id);
@@ -733,7 +737,8 @@ final class booking_campaigns_test extends advanced_testcase {
     /**
      * Test campaign blockbooking.
      *
-     * @covers \condition\campaign_blockbooking::is_available
+     * @covers \mod_booking\bo_availability\conditions\campaign_blockbooking::is_available
+     *
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -803,7 +808,7 @@ final class booking_campaigns_test extends advanced_testcase {
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
 
-        $campaingdata2 = (object) [
+        $campaigndata2 = (object) [
             'bofieldname' => 'spt1',
             'fieldvalue' => 'yoga',
             'campaignfieldnameoperator' => '!~', // Not contain.
@@ -815,16 +820,16 @@ final class booking_campaigns_test extends advanced_testcase {
             'hascapability' => "",
             'percentageavailableplaces' => 50,
         ];
-        $campaing2 = [
+        $campaign2 = [
             'name' => 'not containing yoga no students, no employees',
             'type' => 1,
             'starttime' => strtotime('yesterday'),
             'endtime' => strtotime('now + 1 month'),
             'pricefactor' => 1,
             'limitfactor' => 1,
-            'json' => json_encode($campaingdata2),
+            'json' => json_encode($campaigndata2),
         ];
-        $plugingenerator->create_campaign($campaing2);
+        $plugingenerator->create_campaign($campaign2);
 
         // Create 1st booking option.
         $record = new stdClass();
@@ -885,7 +890,8 @@ final class booking_campaigns_test extends advanced_testcase {
     /**
      * Test campaign blockbooking.
      *
-     * @covers \condition\campaign_blockbooking::is_available
+     * @covers \mod_booking\bo_availability\conditions\campaign_blockbooking::is_available
+     *
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -955,8 +961,8 @@ final class booking_campaigns_test extends advanced_testcase {
         /** @var mod_booking_generator $plugingenerator */
         $plugingenerator = self::getDataGenerator()->get_plugin_generator('mod_booking');
 
-        // Create 1st blocking campaing: with multiple custom user profile fields and without bofield.
-        $campaingdata1 = (object) [
+        // Create 1st blocking campaign: with multiple custom user profile fields and without bofield.
+        $campaigndata1 = (object) [
             'bofieldname' => '0',
             'campaignfieldnameoperator' => null,
             'fieldvalue' => '',
@@ -968,16 +974,16 @@ final class booking_campaigns_test extends advanced_testcase {
             'hascapability' => "",
             'percentageavailableplaces' => 50,
         ];
-        $campaing1 = [
+        $campaign1 = [
             'name' => 'multiple_user_fields',
             'type' => 1,
             'starttime' => strtotime('yesterday'),
             'endtime' => strtotime('now + 1 month'),
             'pricefactor' => 1,
             'limitfactor' => 1,
-            'json' => json_encode($campaingdata1),
+            'json' => json_encode($campaigndata1),
         ];
-        $plugingenerator->create_campaign($campaing1);
+        $plugingenerator->create_campaign($campaign1);
 
         // Create 1st booking option.
         $record = new stdClass();
@@ -1039,15 +1045,15 @@ final class booking_campaigns_test extends advanced_testcase {
         [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student3->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
 
-        // Try to book options with teacher. Everything blocks because doesn't have values in the profile field.
+        // Try to book options with teacher.
         $this->setUser($teacher);
         singleton_service::destroy_user($teacher->id);
         [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $teacher->id, true);
-        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
         [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $teacher->id, true);
-        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
         [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $teacher->id, true);
-        $this->assertEquals(MOD_BOOKING_BO_COND_CAMPAIGN_BLOCKBOOKING, $id);
+        $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
 
         // Try to book options with employee.
         $this->setUser($employee);

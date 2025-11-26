@@ -18,6 +18,7 @@ namespace mod_booking\form;
 
 use html_writer;
 use mod_booking\option\dates_handler;
+use mod_booking\option\time_handler;
 use stdClass;
 
 /**
@@ -28,7 +29,6 @@ use stdClass;
  * @license     http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class modaloptiondateform extends \core_form\dynamic_form {
-
     /**
      * {@inheritdoc}
      * @see moodleform::definition()
@@ -45,18 +45,29 @@ class modaloptiondateform extends \core_form\dynamic_form {
         // Options to store help button texts etc.
         $repeateloptions = [];
 
-        $optiondatelabel = html_writer::tag('b', get_string('optiondate', 'booking') . ' {no}',
-            ['class' => 'optiondatelabel']);
+        $optiondatelabel = html_writer::tag(
+            'b',
+            get_string('optiondate', 'booking') . ' {no}',
+            ['class' => 'optiondatelabel']
+        );
         $repeatedoptiondates[] = $mform->createElement('static', 'optiondatelabel', $optiondatelabel);
 
-        $repeatedoptiondates[] = $mform->createElement('date_time_selector', 'optiondatestart',
-            get_string('optiondatestart', 'booking'));
+        $repeatedoptiondates[] = $mform->createElement(
+            'date_time_selector',
+            'optiondatestart',
+            get_string('optiondatestart', 'booking'),
+            time_handler::set_timeintervall(),
+        );
         // Info: Help buttons in repeat_elements groups are causing problems with Moodle 4.0.
         // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
         /* $repeateloptions['optiondatestart']['helpbutton'] = ['optiondatestart', 'mod_booking']; */
 
-        $repeatedoptiondates[] = $mform->createElement('date_time_selector', 'optiondateend',
-            get_string('optiondateend', 'booking'));
+        $repeatedoptiondates[] = $mform->createElement(
+            'date_time_selector',
+            'optiondateend',
+            get_string('optiondateend', 'booking'),
+            time_handler::set_timeintervall(),
+        );
         // Info: Help buttons in repeat_elements groups are causing problems with Moodle 4.0.
         // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
         /* $repeateloptions['optiondateend']['helpbutton'] = ['optiondateend', 'mod_booking']; */
@@ -69,9 +80,17 @@ class modaloptiondateform extends \core_form\dynamic_form {
             $numberofoptiondatestoshow = count($existingoptiondates);
         }*/
 
-        $this->repeat_elements($repeatedoptiondates, $numberofoptiondatestoshow,
-            $repeateloptions, 'optiondates', 'addoptiondate', 1, get_string('addoptiondate', 'mod_booking'),
-            true, 'deleteoptiondate');
+        $this->repeat_elements(
+            $repeatedoptiondates,
+            $numberofoptiondatestoshow,
+            $repeateloptions,
+            'optiondates',
+            'addoptiondate',
+            1,
+            get_string('addoptiondate', 'mod_booking'),
+            true,
+            'deleteoptiondate'
+        );
     }
 
     /**
@@ -145,11 +164,11 @@ class modaloptiondateform extends \core_form\dynamic_form {
         $optiondatesarray = [];
         $resultarray = [];
 
-        if (!empty($data->optiondatestart) && is_array($data->optiondatestart)
-            && !empty($data->optiondateend) && is_array($data->optiondateend)) {
-
+        if (
+            !empty($data->optiondatestart) && is_array($data->optiondatestart)
+            && !empty($data->optiondateend) && is_array($data->optiondateend)
+        ) {
             foreach ($data->optiondatestart as $idx => $optiondatestart) {
-
                 $optiondate = new stdClass();
                 $randomid = bin2hex(random_bytes(4));
                 $optiondate->dateid = 'customdate-' . $randomid;
@@ -157,8 +176,11 @@ class modaloptiondateform extends \core_form\dynamic_form {
                 $optiondate->endtimestamp = $data->optiondateend[$idx];
 
                 // If dates are on the same day, then show date only once.
-                $optiondate->string = dates_handler::prettify_optiondates_start_end($optiondate->starttimestamp,
-                    $optiondate->endtimestamp, current_language());
+                $optiondate->string = dates_handler::prettify_optiondates_start_end(
+                    $optiondate->starttimestamp,
+                    $optiondate->endtimestamp,
+                    current_language()
+                );
 
                 $optiondatesarray[] = $optiondate;
             }

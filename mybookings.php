@@ -28,57 +28,41 @@ require_once($CFG->dirroot . '/mod/booking/locallib.php');
 // No guest autologin.
 require_login(0, false);
 
-use mod_booking\mybookings_table;
+use mod_booking\shortcodes;
+use mod_booking\singleton_service;
 
 $url = new moodle_url('/mod/booking/mybookings.php');
+$userid = optional_param('userid', 0, PARAM_INT);
+$completed = optional_param('completed', 0, PARAM_INT);
 $PAGE->set_url($url);
 
-$course = $DB->get_record('course', ['id' => SITEID], '*', MUST_EXIST);
+if (!empty($userid)) {
+    $user = singleton_service::get_instance_of_user($userid);
+} else {
+    $user = $USER;
+    $userid = $USER->id;
+}
 
-$PAGE->set_context(context_user::instance($USER->id));
-$PAGE->navigation->extend_for_user($USER);
+$PAGE->set_context(context_user::instance($user->id));
+$PAGE->navigation->extend_for_user($user);
 $mybookingsurl = new moodle_url('/mod/booking/mybookings.php');
 $PAGE->navbar->add(get_string('mybookingoptions', 'mod_booking'), $mybookingsurl);
 
-$PAGE->set_pagelayout('incourse');
-$PAGE->set_title(format_string($course->fullname));
-$PAGE->set_heading(fullname($USER));
+$PAGE->set_pagelayout('base');
 
 echo $OUTPUT->header();
 
 echo $OUTPUT->heading(get_string('mybookingoptions', 'mod_booking'));
 
-echo $OUTPUT->box_start();
+if ($userid != $USER->id) {
+    $arguments = ['userid' => $userid, 'completed' => $completed, 'exclude' => 'booknow'];
+} else {
+    $arguments = ['userid' => $userid, 'completed' => $completed];
+}
+echo shortcodes::mycourselist('', $arguments, '', (object)[], fn($a) => $a);
 
-$table = new mybookings_table('mybookings');
-
-$fields = 'ba.id id, c.id courseid, c.fullname fullname, b.id bookingid, b.name AS name, bo.text AS text, bo.id optionid,
-    bo.coursestarttime AS coursestarttime, bo.courseendtime courseendtime, cm.id cmid';
-$from = "{booking_answers} ba
-    LEFT JOIN
-    {booking_options} bo
-    ON ba.optionid = bo.id
-    LEFT JOIN
-    {booking} b
-    ON b.id = bo.bookingid
-    LEFT JOIN
-    {course} c
-    ON c.id = b.course
-    LEFT JOIN
-    {course_modules} cm
-    ON cm.module = (
-        SELECT m.id
-        FROM {modules} m
-        WHERE m.name = 'booking'
-    ) AND cm.instance = b.id";
-$where = "userid = :userid AND cm.visible = 1 AND bo.invisible = 0";
-$params = ['userid' => $USER->id];
-
-$table->set_sql($fields, $from, $where, $params);
-
-$table->define_baseurl($url);
-$table->out(25, true);
-
-echo $OUTPUT->box_end();
+if (class_exists('local_shopping_cart\shopping_cart') && get_config('booking', 'displayshoppingcarthistory')) {
+    echo local_shopping_cart\shortcodes::shoppingcarthistory('', [], '', (object)[], fn($a) => $a);
+}
 
 echo $OUTPUT->footer();

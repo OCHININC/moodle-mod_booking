@@ -24,7 +24,6 @@
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class behat_mod_booking_generator extends behat_generator_base {
-
     /**
      * Get a list of the entities that Behat can create using the generator step.
      *
@@ -67,6 +66,7 @@ class behat_mod_booking_generator extends behat_generator_base {
                 'required' => ['identifier', 'name', 'startdate', 'enddate'],
             ],
             'rules' => [
+                'singular' => 'rule',
                 'datagenerator' => 'rule',
                 'required' => [
                         'conditionname', 'contextid',
@@ -80,6 +80,12 @@ class behat_mod_booking_generator extends behat_generator_base {
                 'datagenerator' => 'user_purchase',
                 'required' => ['booking', 'option', 'user'],
                 'switchids' => ['booking' => 'bookingid', 'option' => 'optionid', 'user' => 'userid'],
+            ],
+            'actions' => [
+                'singular' => 'action',
+                'datagenerator' => 'action',
+                'required' => ['option', 'action_type', 'boactionname', 'boactionjson'],
+                'switchids' => ['option' => 'optionid'],
             ],
         ];
     }
@@ -128,5 +134,4 @@ class behat_mod_booking_generator extends behat_generator_base {
         }
         return $id;
     }
-
 }

@@ -92,7 +92,9 @@ class modechecker {
         ) {
             // The book only on details page avoid js and allows booking only on the details page.
             if (
-                get_config('booking', 'bookonlyondetailspage')
+                (
+                    get_config('booking', 'bookonlyondetailspage')
+                )
                 && (
                     !self::is_ajax_or_webservice_request()
                     || !(self::is_mod_booking_bookit()
@@ -121,7 +123,8 @@ class modechecker {
 
         if (
             optional_param('info', '', PARAM_ALPHANUMEXT) === 'mod_booking_bookit'
-            || optional_param('wsfunction', '', PARAM_ALPHANUMEXT) === 'mod_booking_bookit') {
+            || optional_param('wsfunction', '', PARAM_ALPHANUMEXT) === 'mod_booking_bookit'
+        ) {
                 return true;
         }
         return false;
@@ -136,7 +139,8 @@ class modechecker {
     public static function is_load_pre_booking_page() {
         if (
             optional_param('info', '', PARAM_ALPHANUMEXT) === 'mod_booking_load_pre_booking_page'
-            || optional_param('wsfunction', '', PARAM_ALPHANUMEXT) === 'mod_booking_load_pre_booking_page') {
+            || optional_param('wsfunction', '', PARAM_ALPHANUMEXT) === 'mod_booking_load_pre_booking_page'
+        ) {
                 return true;
         }
         return false;

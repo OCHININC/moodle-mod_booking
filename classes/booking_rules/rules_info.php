@@ -27,6 +27,8 @@ namespace mod_booking\booking_rules;
 
 use context;
 use context_module;
+use core_component;
+use core_plugin_manager;
 use dml_exception;
 use context_system;
 use mod_booking\local\templaterule;
@@ -48,6 +50,13 @@ class rules_info {
      * @var array
      */
     public static $rulestoexecute = [];
+
+    /**
+     * Collect rules we want to cancel at the end of the request.
+     *
+     * @var array
+     */
+    public static $rulestocancel = [];
 
     /**
      * Collect events to execute them at the end of the request.
@@ -196,7 +205,18 @@ class rules_info {
                 $rules[] = $instance;
             }
         }
-
+        foreach (core_plugin_manager::instance()->get_plugins_of_type('bookingextension') as $plugin) {
+            $classes = core_component::get_component_classes_in_namespace(
+                "bookingextension_{$plugin->name}",
+                'rules\\rules'
+            );
+            foreach ($classes as $classname => $path) {
+                if (class_exists($classname)) {
+                          $instance = new $classname();
+                          $rules[] = $instance;
+                }
+            }
+        }
         return $rules;
     }
 
@@ -206,14 +226,17 @@ class rules_info {
      * @return mixed
      */
     public static function get_rule(string $rulename) {
-
         $filename = 'mod_booking\\booking_rules\\rules\\' . $rulename;
-
         // We instantiate all the classes, because we need some information.
         if (class_exists($filename)) {
             return new $filename();
         }
-
+        foreach (core_plugin_manager::instance()->get_plugins_of_type('bookingextension') as $plugin) {
+            $classname = "\\bookingextension_{$plugin->name}\\rules\\rules\\{$rulename}";
+            if (class_exists($classname)) {
+                return new $classname();
+            }
+        }
         return null;
     }
 
@@ -232,8 +255,13 @@ class rules_info {
             return new stdClass();
         }
 
-        // If we have an ID, we retrieve the right rule from DB.
-        $record = $DB->get_record('booking_rules', ['id' => $data->id]);
+        if ($data->id < 0) {
+            // We get the value from the predefined templates.
+            $record = templaterule::get_template_record_by_id($data->id);
+        } else {
+            // If we have an ID, we retrieve the right rule from DB.
+            $record = $DB->get_record('booking_rules', ['id' => $data->id]);
+        }
 
         $data->contextid = $record->contextid;
 
@@ -324,7 +352,7 @@ class rules_info {
                     continue;
                 }
 
-                if ($record->rulename != 'rule_daysbefore') {
+                if ($record->rulename === 'rule_react_on_event') {
                     continue;
                 }
 
@@ -384,7 +412,10 @@ class rules_info {
         $data = $event->get_data();
 
         // Check if rule is from booking plugin or another.
-        if ($data['component'] !== 'mod_booking') {
+        if (
+            $data['component'] !== 'mod_booking'
+            && strpos($data['component'], 'bookingextension_') !== 0
+        ) {
             if (!self::proceed_with_event($event, $data)) {
                 return;
             };
@@ -395,6 +426,9 @@ class rules_info {
 
         $contextid = $event->contextid;
         $records = booking_rules::get_list_of_saved_rules_by_context($contextid, $eventname);
+
+        // There are cases where an event is triggered twice in a very narrow timespan.
+        $data['timecreated'] = strtotime(date('Y-m-d H:00:00', ($data['timecreated'] ?? time()) + 3600));
 
         // Now we check all the existing rules from booking.
         foreach ($records as $record) {
@@ -440,7 +474,7 @@ class rules_info {
 
         $rulestoexecute = $allrules;
 
-        foreach ($allrules as $ruleid => $rulearray) {
+        foreach ($allrules as $rkey => $rulearray) {
             // Run through all the excluded rules of this array and unset them.
             $rule = $rulearray['rule'];
 
@@ -448,10 +482,17 @@ class rules_info {
                 // Inactive rules can't exculde others.
                 continue;
             }
+            if (in_array($rulearray['ruleid'], array_values(self::$rulestocancel))) {
+                // This rule has been cancelled by another rule.
+                unset($rulestoexecute[$rkey]);
+                unset(self::$rulestoexecute[$rkey]);
+                continue;
+            }
             $ruleobject = json_decode($rule->rulejson);
             $ruledata = $ruleobject->ruledata;
             if (!empty($ruledata->cancelrules)) {
                 foreach ($ruledata->cancelrules as $cancelrule) {
+                    self::$rulestocancel[$cancelrule] = $cancelrule;
                     foreach ($rulestoexecute as $key => $rulearray) {
                         if ($rulearray['ruleid'] == $cancelrule) {
                             unset($rulestoexecute[$key]);

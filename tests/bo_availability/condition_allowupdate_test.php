@@ -32,6 +32,9 @@ use mod_booking_generator;
 use context_system;
 use mod_booking\bo_availability\bo_info;
 use stdClass;
+use tool_mocktesttime\time_mock;
+use mod_booking\booking_rules\booking_rules;
+use mod_booking\booking_rules\rules_info;
 
 defined('MOODLE_INTERNAL') || die();
 global $CFG;
@@ -52,13 +55,17 @@ final class condition_allowupdate_test extends advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest(true);
+        time_mock::init();
+        time_mock::set_mock_time(strtotime('now'));
+        singleton_service::destroy_instance();
     }
 
     /**
      * Test booking, cancelation, option has started etc.
      *
-     * @covers \condition\iscancelled::is_available
-     * @covers \condition\hasstarted::is_available
+     * @covers \mod_booking\bo_availability\conditions\iscancelled::is_available
+     * @covers \mod_booking\bo_availability\conditions\optionhasstarted::is_available
+     *
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -133,8 +140,9 @@ final class condition_allowupdate_test extends advanced_testcase {
     /**
      * Test cancelation with all cancelrelativedate options.
      *
-     * @covers \condition\iscancelled::is_available
-     * @covers \condition\hasstarted::is_available
+     * @covers \mod_booking\bo_availability\conditions\iscancelled::is_available
+     * @covers \mod_booking\bo_availability\conditions\optionhasstarted::is_available
+     *
      * @param array $bdata
      *
      * @return void
@@ -284,9 +292,10 @@ final class condition_allowupdate_test extends advanced_testcase {
     /**
      * Test isbookable, bookitbutton, alreadybooked.
      *
-     * @covers \condition\isbookable::is_available
-     * @covers \condition\bookitbutton::is_available
-     * @covers \condition\alreadybooked::is_available
+     * @covers \mod_booking\bo_availability\conditions\isbookable::is_available
+     * @covers \mod_booking\bo_availability\conditions\isbookableinstance::is_available
+     * @covers \mod_booking\bo_availability\conditions\bookitbutton::is_available
+     *
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -297,7 +306,7 @@ final class condition_allowupdate_test extends advanced_testcase {
         global $DB, $CFG;
 
         // Setup test data.
-        $course = $this->getDataGenerator()->create_course(['enablecompletion' => 1]);
+        $course = $this->getDataGenerator()->create_course(['enablecompletion' => 1], ['createsections' => true]);
 
         // Create users.
         $student1 = $this->getDataGenerator()->create_user();
@@ -317,6 +326,7 @@ final class condition_allowupdate_test extends advanced_testcase {
         $this->getDataGenerator()->enrol_user($teacher->id, $course->id);
         $this->getDataGenerator()->enrol_user($bookingmanager->id, $course->id);
 
+        // Setup booking option with disabled booking.
         $record = new stdClass();
         $record->bookingid = $booking1->id;
         $record->text = 'Test option1';
@@ -330,39 +340,51 @@ final class condition_allowupdate_test extends advanced_testcase {
         $settings1 = singleton_service::get_instance_of_booking_option_settings($option1->id);
         $boinfo1 = new bo_info($settings1);
 
-        // Try to book the student1.
+        // Try to book the student1 and validate that booking is disabled for the option1.
         $this->setUser($student1);
-
-        // Try to book again with user1.
         [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ISBOOKABLE, $id);
 
-        // Now we enable option1 back.
+        // Now we enable option1 booking permission back.
         $this->setAdminUser();
         $record->id = $option1->id;
         $record->cmid = $settings1->cmid;
         $record->disablebookingusers = 0;
         booking_option::update($record);
 
-        // Try to book again with user1.
+        // Try to book again with user1 to confirm that it is accessible.
         $this->setUser($student1);
         [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_BOOKITBUTTON, $id);
 
-        // That was just for fun. Now we make sure the student1 will be booked.
-        $result = booking_bookit::bookit('option', $settings1->id, $student1->id);
-        $result = booking_bookit::bookit('option', $settings1->id, $student1->id);
+        // Update entire booking instance to block any bookigs.
+        $this->setAdminUser();
+        // Get booking as coursemodule info.
+        $cm = get_coursemodule_from_instance('booking', $settings1->bookingid);
+        [$cm, $context, $module, $bookingdata, $cw] = get_moduleinfo_data($cm, $course);
+        // Add json settings and block booking.
+        $bookingsettings = singleton_service::get_instance_of_booking_settings_by_bookingid($settings1->bookingid);
+        $bookingdata->json = $bookingsettings->json;
+        $bookingdata->disablebooking = 1;
+        booking::add_data_to_json($bookingdata, "disablebooking", 1);
+        // Update booking instance and validate new setting.
+        booking::purge_cache_for_booking_instance_by_cmid($cm->id);
+        $DB->update_record('booking', $bookingdata);
+        singleton_service::destroy_booking_singleton_by_cmid($settings1->cmid);
+        $this->assertEquals(1, booking::get_value_of_json_by_key((int) $settings1->bookingid, "disablebooking"));
+
+        $this->setUser($student1);
         [$id, $isavailable, $description] = $boinfo1->is_available($settings1->id, $student1->id, true);
-        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ISBOOKABLEINSTANCE, $id);
     }
 
     /**
      * Test subbookings - person.
      *
-     * @covers \condition\subbooking_blocks::is_available
-     * @covers \condition\subbooking::is_available
-     * @covers \subbookings\booking_subbooking
-     * @covers \subbookings\sb_types\subbooking_additionalperson
+     * @covers \mod_booking\bo_availability\conditions\subbooking_blocks::is_available
+     * @covers \mod_booking\bo_availability\conditions\subbooking::is_available
+     * @covers \mod_booking\subbookings\subbookings_info
+     * @covers \mod_booking\subbookings\sb_types\subbooking_additionalperson
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -497,7 +519,6 @@ final class condition_allowupdate_test extends advanced_testcase {
         $result = booking_bookit::bookit('option', $settings2->id, $student2->id);
         [$id, $isavailable, $description] = $boinfo2->is_available($settings2->id, $student2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
-        // TODO: how to make subboking in code?
 
         // Mandatory to solve potential cache issues.
         singleton_service::destroy_booking_option_singleton($option1->id);
@@ -537,5 +558,8 @@ final class condition_allowupdate_test extends advanced_testcase {
         parent::tearDown();
         // Mandatory clean-up.
         singleton_service::destroy_instance();
+        // Mandatory to deal with static variable in the booking_rules.
+        rules_info::destroy_singletons();
+        booking_rules::$rules = [];
     }
 }

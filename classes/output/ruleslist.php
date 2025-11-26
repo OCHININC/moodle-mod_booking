@@ -67,18 +67,20 @@ class ruleslist implements renderable, templatable {
             $rule->name = $ruleobj->name ?? '';
             $rule->actionname = $ruleobj->actionname ?? '';
             $rule->conditionname = $ruleobj->conditionname ?? '';
+            $rulecomponent = $ruleobj->ruledata->component ?? 'mod_booking';
+            $conditioncomponent = $ruleobj->conditioncomponent ?? 'mod_booking';
+            $actioncomponent = $ruleobj->actiondata->component ?? 'mod_booking';
 
             // Localize the names if possible.
             $localizedrulename = str_replace("_", "", $rule->rulename) ?? '';
             $localizedconditionname = str_replace("_", "", $rule->conditionname) ?? '';
             $localizedactionname = str_replace("_", "", $rule->actionname) ?? '';
-
             $rule->localizedrulename = !empty($localizedrulename) ?
-                get_string($localizedrulename, 'mod_booking') : '';
+                get_string($localizedrulename, $rulecomponent) : '';
             $rule->localizedconditionname = !empty($localizedconditionname) ?
-                get_string($localizedconditionname, 'mod_booking') : '';
+                get_string($localizedconditionname, $conditioncomponent) : '';
             $rule->localizedactionname = !empty($localizedactionname) ?
-                get_string($localizedactionname, 'mod_booking') : '';
+                get_string($localizedactionname, $actioncomponent) : '';
 
             // Filter for rules of this or other context.
             if ($rule->contextid == $contextid) {
@@ -97,25 +99,33 @@ class ruleslist implements renderable, templatable {
                     JOIN {course_modules} cm ON cm.id = ctx.instanceid
                     JOIN {course} c ON cm.course = c.id
                     WHERE ctx.id = :contextid
-                    AND ctx.contextlevel = 70
+                    AND ctx.contextlevel = :contextlevel
                     ";
-                $params = ['contextid' => $rule->contextid];
+                $params = [
+                    'contextid' => $rule->contextid,
+                    'contextlevel' => CONTEXT_MODULE,
+                ];
                 $ruledata = $DB->get_record_sql($sql, $params);
+                if (empty($ruledata->instanceid)) {
+                    continue;
+                }
                 $url = new moodle_url('/mod/booking/edit_rules.php', ['cmid' => $ruledata->instanceid]);
-                $booking = singleton_service::get_instance_of_booking_by_cmid($ruledata->instanceid);
+                $bookingsettings = singleton_service::get_instance_of_booking_settings_by_cmid($ruledata->instanceid);
 
                 $rule->courseid = $ruledata->courseid;
                 $rule->coursename = $ruledata->coursename;
                 $rule->linktorulesininstance = $url->out();
-                $rule->bookingname = $booking->settings->name;
+                $rule->bookingname = $bookingsettings->name;
 
                 $contexts[$rule->contextid] = 1;
                 $this->rulesothercontext[] = (array)$rule;
             }
             // Make sure, rules from the same course appear next to each other in the list.
-            usort($this->rulesothercontext, function ($a, $b) {
-                return strcmp($a['coursename'], $b['coursename']);
-            });
+            if (!empty($this->rulesothercontext)) {
+                usort($this->rulesothercontext, function ($a, $b) {
+                    return strcmp($a['coursename'], $b['coursename']);
+                });
+            }
         }
         $this->contextid = $contextid;
         $this->enableaddbutton = $enableaddbutton;

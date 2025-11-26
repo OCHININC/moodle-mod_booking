@@ -29,7 +29,6 @@ use mod_booking\teachers_handler;
  * Structure step to restore one booking activity
  */
 class restore_booking_activity_structure_step extends restore_activity_structure_step {
-
     /**
      * Function that will return the structure to be processed by this restore_step.
      * Must return one array of @restore_path_element elements
@@ -53,6 +52,10 @@ class restore_booking_activity_structure_step extends restore_activity_structure
             '/activity/booking/tags/tag'
         );
         $paths[] = new restore_path_element(
+            'booking_history',
+            '/activity/booking/history/historyitem'
+        );
+        $paths[] = new restore_path_element(
             'booking_other',
             '/activity/booking/options/option/others/other'
         );
@@ -68,7 +71,6 @@ class restore_booking_activity_structure_step extends restore_activity_structure
                 'booking_option',
                 '/activity/booking/options/option'
             );
-
             $paths[] = new restore_path_element(
                 'booking_optiondate',
                 '/activity/booking/optiondates/optiondate'
@@ -185,8 +187,14 @@ class restore_booking_activity_structure_step extends restore_activity_structure
                 ];
 
                 // Get file.
-                $file = $fs->get_file($fileinfo['contextid'], $fileinfo['component'], $fileinfo['filearea'],
-                                    $fileinfo['itemid'], $fileinfo['filepath'], $fileinfo['filename']);
+                $file = $fs->get_file(
+                    $fileinfo['contextid'],
+                    $fileinfo['component'],
+                    $fileinfo['filearea'],
+                    $fileinfo['itemid'],
+                    $fileinfo['filepath'],
+                    $fileinfo['filename']
+                );
 
                 // Read contents of the old image file.
                 if ($file && $cmid) {
@@ -237,7 +245,10 @@ class restore_booking_activity_structure_step extends restore_activity_structure
         $data->calendarid = 0;
 
         // Unique identifier must not be copied, instead we create a new random one.
-        $data->identifier = booking_option::create_truly_unique_option_identifier();
+        if (empty($data->identifier) || $DB->record_exists('booking_options', ['identifier' => $data->identifier])) {
+            // If the identifier already exists, we need to create a new one.
+            $data->identifier = booking_option::create_truly_unique_option_identifier();
+        }
 
         $newitemid = $DB->insert_record('booking_options', $data);
 
@@ -297,8 +308,14 @@ class restore_booking_activity_structure_step extends restore_activity_structure
             ];
 
             // Get file.
-            $file = $fs->get_file($fileinfo['contextid'], $fileinfo['component'], $fileinfo['filearea'],
-                                $fileinfo['itemid'], $fileinfo['filepath'], $fileinfo['filename']);
+            $file = $fs->get_file(
+                $fileinfo['contextid'],
+                $fileinfo['component'],
+                $fileinfo['filearea'],
+                $fileinfo['itemid'],
+                $fileinfo['filepath'],
+                $fileinfo['filename']
+            );
 
             // Read contents of the old image file.
             if ($file && $cmid) {
@@ -447,6 +464,24 @@ class restore_booking_activity_structure_step extends restore_activity_structure
         $DB->insert_record('booking_other', $data);
         // No need to save this mapping as far as nothing depends on it.
     }
+    /**
+     * Processes booking history data.
+     *
+     * @param array $data The instance data from the backup file.
+     * @throws dml_exception
+     */
+    protected function process_booking_history($data) {
+        global $DB;
+        $data = (object)$data;
+
+        $data->bookingid = $this->get_new_parentid('booking');
+        $data->optionid = $this->get_mappingid('booking_option', $data->optionid);
+        $data->answerid = $this->get_mappingid('booking_answers', $data->answerid);
+        $data->userid = $this->get_mappingid('user', $data->userid);
+
+        $DB->insert_record('booking_history', $data);
+    }
+
 
     /**
      * Processes booking entity data for booking options.

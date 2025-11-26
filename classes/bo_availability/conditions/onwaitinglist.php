@@ -29,8 +29,9 @@
 use context_system;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_option_settings;
+use mod_booking\local\confirmationworkflow\confirmation;
 use mod_booking\singleton_service;
 use MoodleQuickForm;
 
@@ -49,7 +50,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class onwaitinglist implements bo_condition {
-
     /** @var int $id Standard Conditions have hardcoded ids. */
     public $id = MOD_BOOKING_BO_COND_ONWAITINGLIST;
 
@@ -106,19 +106,25 @@ class onwaitinglist implements bo_condition {
         if (!isset($bookinginformation['onwaitinglist'])) {
             $isavailable = true;
         } else if (!empty($settings->jsonobject->useprice)) {
+            $usersonwaitinglist = $bookinganswer->get_usersonwaitinglist();
             // If user is confirmed, we don't block.
-            $ba = $bookinganswer->usersonwaitinglist[$userid];
-
-            if (($bookinginformation['onwaitinglist']['fullybooked'] === false)) {
+            $ba = $usersonwaitinglist[$userid];
+            if (
+                ($bookinginformation['onwaitinglist']['fullybooked'] === false)
+                // Only confirm is this person is next on the list.
+            ) {
                 // If there are places free, we might want to allow booking.
                 // Either when we don't need confirmation.
                 if (empty($settings->waitforconfirmation)) {
                     $isavailable = true;
                 } else if (!empty($ba->json)) {
-                    // Or when confirmation is already given.
-                    $jsonobject = json_decode($ba->json);
+                    // Or when confirmation is already given. Get number of current confirmations then compare it
+                    // with the required number of confirmations. If number of required confirmations is equal to
+                    // number of received confirmations, the button should block.
+                    $currentconfirmationscount = json_decode($ba->json)->confirmationcount ?? 0; // Current received confirmations.
+                    $requiredconfirmationscount = confirmation::get_required_confirmation_count($bookinganswer->optionid);
                     if (
-                        !empty($jsonobject->confirmwaitinglist)
+                        $currentconfirmationscount >= $requiredconfirmationscount
                         || empty($settings->waitforconfirmation)
                     ) {
                         $isavailable = true;
@@ -139,10 +145,10 @@ class onwaitinglist implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -190,9 +196,11 @@ class onwaitinglist implements bo_condition {
         $description = $this->get_description_string($isavailable, $full, $userid, $settings);
 
         // If the user is in principle allowed to overbook AND the overbook setting is set in the instance, overbooking is possible.
-        if (!empty($settings->waitforconfirmation)
+        if (
+            !empty($settings->waitforconfirmation)
             && !empty(get_config('booking', 'allowoverbooking'))
-            && has_capability('mod/booking:canoverbook', context_system::instance())) {
+            && has_capability('mod/booking:canoverbook', context_system::instance())
+        ) {
             $buttontype = MOD_BOOKING_BO_BUTTON_MYALERT;
         } else {
             $buttontype = MOD_BOOKING_BO_BUTTON_JUSTMYALERT;
@@ -274,14 +282,28 @@ class onwaitinglist implements bo_condition {
             $description = $full ? get_string('bocondonwaitinglistfullavailable', 'mod_booking') :
                 get_string('bocondonwaitinglistavailable', 'mod_booking');
         } else {
+            if ($settings->waitforconfirmation > 0) {
+                // We need a separate string when waitinglist is only waiting for confirmation.
+                $ba = singleton_service::get_instance_of_booking_answers($settings);
+                // The answer will have the confirmation key.
+                $usersonwaitinglist = $ba->get_usersonwaitinglist();
+                if ($useranswer = $usersonwaitinglist[$userid] ?? false) {
+                    $jsonobject = !empty($useranswer->json) ? json_decode($useranswer->json) : (object)[];
+                    $confirmationcount = confirmation::get_required_confirmation_count($settings->id);
+                    if (
+                        empty($jsonobject->confirmationcount)
+                        || $jsonobject->confirmationcount < $confirmationcount
+                    ) {
+                        return get_string('bocondonwaitinglistwaitforconfirmation', 'mod_booking');
+                    }
+                }
+            }
 
             if (get_config('booking', 'waitinglistshowplaceonwaitinglist')) {
-
                 $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
                 $placeonwaitinglist = $bookinganswer->return_place_on_waitinglist($userid);
 
                 $description = get_string('yourplaceonwaitinglist', 'mod_booking', $placeonwaitinglist);
-
             } else {
                 $description = $full ? get_string('bocondonwaitinglistfullnotavailable', 'mod_booking') :
                 get_string('bocondonwaitinglistnotavailable', 'mod_booking');

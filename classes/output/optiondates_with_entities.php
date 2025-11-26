@@ -44,7 +44,6 @@ use stdClass;
  * @license     http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class optiondates_with_entities implements renderable, templatable {
-
     /** @var bool $showsessions */
     public $showsessions = true;
 
@@ -56,7 +55,6 @@ class optiondates_with_entities implements renderable, templatable {
 
     /**
      * Constructor
-     *
      * @param booking_option_settings $settings
      */
     public function __construct(booking_option_settings $settings) {
@@ -67,18 +65,14 @@ class optiondates_with_entities implements renderable, templatable {
 
     /**
      * Export for template
-     *
      * @param renderer_base $output
-     *
-     * @return void
-     *
+     * @return array
      */
-    public function export_for_template(renderer_base $output) {
-
+    public function export_for_template(renderer_base $output): array {
         return [
-                'showsessions' => $this->showsessions,
-                'onesession' => $this->onesession,
-                'dates' => $this->sessions,
+            'showsessions' => $this->showsessions,
+            'onesession' => $this->onesession,
+            'dates' => $this->sessions,
         ];
     }
 }

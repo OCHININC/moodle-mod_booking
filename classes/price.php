@@ -24,6 +24,7 @@
 
 namespace mod_booking;
 
+use cache;
 use cache_helper;
 use context_module;
 use context_system;
@@ -61,6 +62,9 @@ class price {
     /** @var int $itemid if area is 'option' then itemid will be the optionid */
     public $itemid;
 
+    /** @var int $bookforuserid A static value which can be set in one request. */
+    private static $bookforuserid;
+
     /**
      * Constructor.
      * @param string $area
@@ -83,9 +87,14 @@ class price {
      *
      * @param MoodleQuickForm $mform reference to the Moodle form
      * @param bool $noformula can be used to turn price formula off (e.g. for subbookings)
+     * @param bool $canbeblockedbyconfigsetting priceisalwayson setting can block this checkbox
      * @return void
      */
-    public function add_price_to_mform(MoodleQuickForm &$mform, bool $noformula = false) {
+    public function add_price_to_mform(
+        MoodleQuickForm &$mform,
+        bool $noformula = false,
+        bool $canbeblockedbyconfigsetting = true
+    ) {
 
         $mform->addElement(
             'header',
@@ -108,7 +117,7 @@ class price {
             [0, 1]
         );
 
-        if (get_config('booking', 'priceisalwayson')) {
+        if (get_config('booking', 'priceisalwayson') && $canbeblockedbyconfigsetting) {
             $mform->hardFreeze('useprice');
         } else {
             $useprice = false;
@@ -860,7 +869,7 @@ class price {
             $area === "option" && isset($price['price'])
         ) {
             $customformstore = new customformstore($user->id, $itemid);
-            $price['price'] = $customformstore->modify_price($price['price'], $categoryidentifier);
+            $price['price'] = $customformstore->modify_price((float)$price['price'], $categoryidentifier);
         }
 
         if (isset($price['price'])) {
@@ -882,7 +891,10 @@ class price {
 
         global $USER;
 
-        if ($userid === 0) {
+        // Shopping Cart logic has precedence here.
+        if (
+            $userid === 0
+        ) {
             if (class_exists('local_shopping_cart\shopping_cart')) {
                 $context = context_system::instance();
                 if (has_capability('local/shopping_cart:cashier', $context)) {
@@ -890,6 +902,20 @@ class price {
                 }
             }
         }
+
+        if (empty($userid) || $USER->id == $userid) {
+            // We can implement an override via singleton.
+
+            $cache = cache::make('mod_booking', 'bookforuser');
+            $result = $cache->get('bookforuser');
+            if ($result) {
+                [$userid, $expirationtime] = $result;
+                if ($expirationtime > time()) {
+                    $userid = $USER->id;
+                }
+            }
+        }
+
         if ($userid) {
             $user = singleton_service::get_instance_of_user($userid);
         } else {
@@ -898,6 +924,27 @@ class price {
         return $user;
     }
 
+    /**
+     * Sets the userid to singleton and cache.
+     * Validity is only 30 seconds.
+     * This is only meant to render correctly in one request and in following webservices.
+     *
+     * @param int $userid
+     *
+     * @return [type]
+     *
+     */
+    public static function set_bookforuser(int $userid) {
+        self::$bookforuserid = $userid;
+        $cache = cache::make('mod_booking', 'bookforuser');
+        $cache->set(
+            'bookforuser',
+            [
+                $userid,
+                time() + 10,
+            ]
+        );
+    }
 
     /**
      * Function to determine price category for user and return shortname of category.
@@ -956,7 +1003,7 @@ class price {
             $userid = $USER->id;
         }
 
-        $cache = \cache::make('mod_booking', 'cachedprices');
+        $cache = cache::make('mod_booking', 'cachedprices');
         // We need to combine area with itemid for uniqueness!
 
         $usercachekey = $area . $itemid . "_" . $userid;
@@ -967,18 +1014,18 @@ class price {
         // For speed, we have cached prices for all and individual prices as well.
         // If we have a cached user price, we can return it right away.
         // If not, we look for the price for all.
-        if ($cacheduserprices === true) {
+        if ($cacheduserprices === true && !defined('BEHAT_SITE_RUNNING')) {
             return [];
-        } else if ($cacheduserprices) { // No price found.
+        } else if ($cacheduserprices && !defined('BEHAT_SITE_RUNNING')) { // No price found.
             $prices = $cacheduserprices;
         } else {
             // Here, we haven't found a user price. We still might have a general price.
             $cachedprices = $cache->get($cachekey);
-            if ($cachedprices === true) { // No price found.
+            if ($cachedprices === true && !defined('BEHAT_SITE_RUNNING')) { // No price found.
                 // We set the user price, to know the next time.
                 $cache->set($usercachekey, true);
                 return [];
-            } else if ($cachedprices && is_array($cachedprices)) {
+            } else if ($cachedprices && is_array($cachedprices) && !defined('BEHAT_SITE_RUNNING')) {
                 $prices = $cachedprices;
 
                 // At this point, we have the general prices, but we might have a user specific camapaign override.
@@ -993,7 +1040,7 @@ class price {
 
                 $sortorder = empty(get_config('booking', 'pricecategorychoosehighest')) ? 'ASC' : 'DESC';
 
-                $sql = "SELECT bp.*
+                $sql = "SELECT bp.*, bpc.name
                         FROM {booking_prices} bp
                         JOIN {booking_pricecategories} bpc ON bp.pricecategoryidentifier = bpc.identifier
                         WHERE area = :area AND itemid = :itemid
@@ -1044,7 +1091,7 @@ class price {
             return $pricecategory;
         }
 
-        $cache = \cache::make('mod_booking', 'cachedpricecategories');
+        $cache = cache::make('mod_booking', 'cachedpricecategories');
         $cachedpricecategory = $cache->get($identifier);
 
         // If we don't have the cache, we need to retrieve the value from db.
@@ -1169,14 +1216,14 @@ class price {
 
             $userspecificprice = empty($userid) ? false : true;
 
-            if ($campaign->userspecificprice !== $userspecificprice) {
+            if ($campaign->user_specific_price() !== $userspecificprice) {
                 continue;
             }
             if ($campaign->campaign_is_active($itemid, $settings)) {
                 foreach ($prices as &$price) {
-                    $price->price = $campaign->get_campaign_price($price->price, $userid);
+                    $price->price = $campaign->get_campaign_price((float)$price->price, $userid);
                     // Render all prices to 2 fixed decimals.
-                    $price->price = number_format(round((float) $price->price, 2), 2, '.', '');
+                    $price->price = round((float)$price->price, 2);
                     // Campaign price factor has been applied.
                 }
             }

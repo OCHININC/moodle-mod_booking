@@ -24,6 +24,8 @@
 
 namespace mod_booking\bo_availability\conditions;
 
+use local_shopping_cart\local\cartstore;
+use local_shopping_cart\shopping_cart;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
 use mod_booking\booking_option_settings;
@@ -113,10 +115,10 @@ class alreadyreserved implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -161,7 +163,7 @@ class alreadyreserved implements bo_condition {
 
         $isavailable = $this->is_available($settings, $userid, $not);
 
-        $description = $this->get_description_string($isavailable, $full, $settings);
+        $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_NONE, MOD_BOOKING_BO_BUTTON_JUSTMYALERT];
     }
@@ -222,7 +224,22 @@ class alreadyreserved implements bo_condition {
         $booking = singleton_service::get_instance_of_booking_settings_by_cmid($settings->cmid);
 
         if (empty($booking->iselective)) {
-            $data = $settings->return_booking_option_information($user);
+            if (
+                get_config('booking', 'screstoreitemfromreserved')
+                && class_exists('local_shopping_cart\shopping_cart')
+            ) {
+                $cartstore = cartstore::instance($userid);
+                if (empty($cartstore->get_item('mod_booking', 'option', $settings->id))) {
+                    shopping_cart::add_item_to_cart(
+                        'mod_booking',
+                        'option',
+                        $settings->id,
+                        $userid
+                    );
+                }
+            }
+
+            $data = $settings->return_booking_option_information($user, false);
 
             if ($fullwidth) {
                 $data['fullwidth'] = $fullwidth;

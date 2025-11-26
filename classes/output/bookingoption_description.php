@@ -26,15 +26,17 @@ namespace mod_booking\output;
 
 use context_module;
 use context_system;
+use core_plugin_manager;
 use html_writer;
 use local_wunderbyte_table\local\customfield\wbt_field_controller_info;
 use mod_booking\booking;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_bookit;
 use mod_booking\booking_context_helper;
 use mod_booking\booking_option;
 use mod_booking\local\modechecker;
 use mod_booking\option\dates_handler;
+use mod_booking\option\fields\competencies;
 use mod_booking\price;
 use mod_booking\singleton_service;
 use moodle_url;
@@ -159,7 +161,7 @@ class bookingoption_description implements renderable, templatable {
     /** @var string $manageresponsesurl */
     private $manageresponsesurl = null;
 
-    /** @var stdClass $responsiblecontactuser */
+    /** @var array $responsiblecontactuser */
     private $responsiblecontactuser = null;
 
     /** @var string $bookingopeningtime */
@@ -182,6 +184,18 @@ class bookingoption_description implements renderable, templatable {
 
     /** @var bool $selflearningcourseshowdurationinfoexpired */
     private $selflearningcourseshowdurationinfoexpired = null;
+
+    /** @var string $competencies */
+    private $competencies = '';
+
+    /** @var string $competencyheader */
+    private $competencyheader = '';
+
+    /** @var array $subpluginstemplatedata */
+    private $subpluginstemplatedata = [];
+
+    /** @var bool $showdownloadcheckbox */
+    private $showdownloadcheckbox = false;
 
     /**
      * Constructor.
@@ -282,9 +296,10 @@ class bookingoption_description implements renderable, templatable {
                 $this->duration = format_time($settings->duration);
 
                 $ba = singleton_service::get_instance_of_booking_answers($settings);
+                $usersonlist = $ba->get_usersonlist();
                 $buyforuser = price::return_user_to_buy_for();
-                if (isset($ba->usersonlist[$buyforuser->id])) {
-                    $timebooked = $ba->usersonlist[$buyforuser->id]->timecreated;
+                if (isset($usersonlist[$buyforuser->id])) {
+                    $timebooked = $usersonlist[$buyforuser->id]->timecreated;
                     $timeremainingsec = $timebooked + $settings->duration - time();
 
                     if ($timeremainingsec <= 0) {
@@ -361,6 +376,15 @@ class bookingoption_description implements renderable, templatable {
             }
         }
 
+        if (has_capability('mod/booking:downloadchecklist', $modcontext)) {
+            $checkboxurl = $link = new moodle_url($CFG->wwwroot . '/mod/booking/report.php', [
+                'id' => $cmid,
+                'optionid' => $optionid,
+                'action' => 'downloadchecklist',
+            ]);
+            $this->showdownloadcheckbox = $checkboxurl;
+        }
+
         // We need this to render a link to manage bookings in the template.
         if (!empty($this->showmanageresponses) && $this->showmanageresponses == true) {
             if (is_array($this->bookinginformation)) {
@@ -373,8 +397,12 @@ class bookingoption_description implements renderable, templatable {
         booking_context_helper::fix_booking_page_context($PAGE, $cmid);
 
         // Description from booking option settings formatted as HTML.
-        $this->description = $settings->description;
-
+        if (empty(get_config('booking', 'changedescriptionfield'))) {
+            $this->description = $settings->description;
+        } else {
+            $customfieldshortname = get_config('booking', 'changedescriptionfield');
+            $this->description = $settings->customfields[$customfieldshortname] ?? "";
+        }
         // Do the same for internal annotation.
         $this->annotation = $settings->annotation;
 
@@ -384,9 +412,8 @@ class bookingoption_description implements renderable, templatable {
         // Attachments.
         $this->attachments = booking_option::render_attachments($optionid, 'optionview-bookingoption-attachments mb-3');
 
-        // Every date will be an array of datestring and customfields.
-        // But customfields will only be shown if we show booking option information inline.
-        // Make sure, that optiondates (sessions) are not stored for self-learning courses.
+        // Every date will be an array of datestrings, customfields and additional info like entities.
+        // Make sure, that optiondates (sessions) are not stored/shown for self-learning courses.
         if (empty($settings->selflearningcourse)) {
             $this->dates = $bookingoption->return_array_of_sessions(
                 $bookingevent,
@@ -403,53 +430,72 @@ class bookingoption_description implements renderable, templatable {
         $colteacher = new col_teacher($optionid, $settings, true);
         $this->teachers = $colteacher->teachers;
 
-        // User object of the responsible contact.
-        $this->responsiblecontactuser = $settings->responsiblecontactuser ?? null;
-        if (!empty($this->responsiblecontactuser)) {
-            $isteacher = false;
-            // For teachers of this course, link to teacherpage instead of user profile.
-            foreach ($settings->teachers as $teacher) {
-                if ($this->responsiblecontactuser->id == $teacher->userid) {
-                    $isteacher = true;
-                }
+        // Array User object of the responsible contact.
+        // Mustache does not like associative arrays, so we make sure, we have array values only.
+        $responsibles = array_values($settings->responsiblecontactuser);
+
+        // If no responsible contact is set, we take the first teacher.
+        if (
+            get_config('booking', 'responsiblecontactshowfirstteacher')
+            && empty($responsibles)
+            && !empty($settings->teachers)
+        ) {
+            $teacher = reset($settings->teachers);
+            $responsible = new stdClass();
+            $responsible->id = $teacher->userid;
+            $responsible->firstname = $teacher->firstname ?? '';
+            $responsible->lastname = $teacher->lastname ?? '';
+            $teacheruser = singleton_service::get_instance_of_user($teacher->userid);
+            if (
+                !empty($teacher->email)
+                && (
+                    $teacheruser->maildisplay == 1
+                    || has_capability('mod/booking:updatebooking', $syscontext)
+                    || get_config('booking', 'teachersshowemails')
+                    || (
+                        get_config('booking', 'bookedteachersshowemails')
+                        && (booking_answers::number_actively_booked($USER->id, $teacher->userid) > 0)
+                    )
+                )
+            ) {
+                $responsible->email = $teacher->email;
             }
-            if ($isteacher) {
-                $this->responsiblecontactuser->link = new moodle_url(
-                    '/mod/booking/teacher.php',
-                    ['teacherid' => $settings->responsiblecontact]
-                );
-            } else {
-                $this->responsiblecontactuser->link = new moodle_url(
-                    '/user/profile.php',
-                    ['id' => $this->responsiblecontactuser->id]
-                );
-            }
+
+            $responsible->link = (new moodle_url(
+                '/mod/booking/teacher.php',
+                ['teacherid' => $teacher->userid]
+            ));
+            $responsibles = [$responsible];
         }
+
+        // Add link to profile page of responsible contact.
+        if (!empty($responsibles)) {
+            foreach ($responsibles as &$responsiblecontact) {
+                if (empty($responsiblecontact)) {
+                    continue;
+                }
+                $responsiblecontact->link = new moodle_url(
+                    '/user/profile.php',
+                    ['id' => $responsiblecontact->id]
+                );
+            }
+        } else {
+            $responsibles = [];
+        }
+
+        // List of responsible contact users.
+        $this->responsiblecontactuser = $responsibles;
 
         if (empty($settings->bookingopeningtime)) {
             $this->bookingopeningtime = null;
         } else {
-            switch (current_language()) {
-                case 'de':
-                    $this->bookingopeningtime = date('d.m.Y, H:i', $settings->bookingopeningtime);
-                    break;
-                default:
-                    $this->bookingopeningtime = date('M d, Y, H:i', $settings->bookingopeningtime);
-                    break;
-            }
+            $this->bookingopeningtime = userdate($settings->bookingopeningtime, get_string('strftimedatetime', 'langconfig'));
         }
 
         if (empty($settings->bookingclosingtime)) {
             $this->bookingclosingtime = null;
         } else {
-            switch (current_language()) {
-                case 'de':
-                    $this->bookingclosingtime = date('d.m.Y, H:i', $settings->bookingclosingtime);
-                    break;
-                default:
-                    $this->bookingclosingtime = date('M d, Y, H:i', $settings->bookingclosingtime);
-                    break;
-            }
+            $this->bookingclosingtime = userdate($settings->bookingclosingtime, get_string('strftimedatetime', 'langconfig'));
         }
 
         if (isset($settings->customfields)) {
@@ -523,6 +569,11 @@ class bookingoption_description implements renderable, templatable {
                     // Currently this is only working for the current USER.
                     $this->booknowbutton = get_string('infowaitinglist', 'booking');
                 }
+                // If competencies are active, we return a list here.
+                $this->competencies = competencies::get_list_of_similar_options(
+                    $bookingoption->settings->competencies ?? "",
+                    $bookingoption
+                );
                 break;
 
             case MOD_BOOKING_DESCRIPTION_CALENDAR:
@@ -559,7 +610,28 @@ class bookingoption_description implements renderable, templatable {
 
                 $this->bookitsection = booking_bookit::render_bookit_button($settings, $this->usertobuyfor->id);
 
+                // If competencies are active, we return a list here.
+                $this->competencies = competencies::get_list_of_similar_options(
+                    $bookingoption->settings->competencies ?? "",
+                    $bookingoption
+                );
+                if (!empty($this->competencies)) {
+                    $this->competencyheader = get_string('showsimilaroptions', 'mod_booking');
+                }
+
                 break;
+        }
+        foreach (core_plugin_manager::instance()->get_plugins_of_type('bookingextension') as $plugin) {
+            $class = "\\bookingextension_{$plugin->name}\\{$plugin->name}";
+            if (!class_exists($class)) {
+                continue; // Skip if the class does not exist.
+            }
+            $sublplugindata = $class::set_template_data_for_optionview($settings);
+            if (!empty($sublplugindata)) {
+                foreach ($sublplugindata as $data) {
+                    $this->subpluginstemplatedata[] = $data;
+                }
+            }
         }
     }
 
@@ -616,6 +688,10 @@ class bookingoption_description implements renderable, templatable {
             'returnurl' => !empty($this->returnurl) ? $this->returnurl : false,
             'canceluntil' => $this->canceluntil,
             'canstillbecancelled' => $this->canstillbecancelled,
+            'competencies' => $this->competencies,
+            'competencyheader' => $this->competencyheader,
+            'subpluginstemplatedata' => $this->subpluginstemplatedata,
+            'showdownloadcheckbox' => $this->showdownloadcheckbox,
         ];
 
         if (!empty($this->timeremaining)) {
@@ -665,7 +741,6 @@ class bookingoption_description implements renderable, templatable {
                 }
             }
         }
-
         return $returnarray;
     }
 

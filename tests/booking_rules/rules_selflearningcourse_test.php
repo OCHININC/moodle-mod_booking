@@ -38,6 +38,7 @@ use local_shopping_cart\shopping_cart_history;
 use local_shopping_cart\local\cartstore;
 use local_shopping_cart\output\shoppingcart_history_list;
 use stdClass;
+use tool_mocktesttime\time_mock;
 
 defined('MOODLE_INTERNAL') || die();
 global $CFG;
@@ -59,12 +60,13 @@ final class rules_selflearningcourse_test extends advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest(true);
+        time_mock::init();
+        time_mock::set_mock_time(strtotime('now'));
+        singleton_service::destroy_instance();
     }
 
     /**
      * Test of booking option with price as well as cancellation by user.
-     *
-     * @covers \booking_bookit
      *
      * @param array $coursedata
      * @param array $pricecategories
@@ -72,9 +74,8 @@ final class rules_selflearningcourse_test extends advanced_testcase {
      * @param array $expected
      * @throws \coding_exception
      * @throws \dml_exception
-     *
+     * @covers \mod_booking\booking_bookit::bookit
      * @dataProvider booking_common_settings_provider
-     *
      */
     public function test_booking_bookit_with_price_and_cancellation(
         array $coursedata,
@@ -83,6 +84,9 @@ final class rules_selflearningcourse_test extends advanced_testcase {
         $expected
     ): void {
         global $DB, $CFG;
+
+        // Clean up singletons.
+        self::tearDown();
 
         $users = [];
         $bookingoptions = [];
@@ -272,8 +276,9 @@ final class rules_selflearningcourse_test extends advanced_testcase {
                 }
             }
         }
+        // Clean up singletons.
+        self::tearDown();
     }
-
 
     /**
      * Data provider for condition_bookingpolicy_test
@@ -467,13 +472,17 @@ final class rules_selflearningcourse_test extends advanced_testcase {
             ],
         ];
 
+        $icalstr = '{"sendical":0,"sendicalcreateorcancel":"",';
+        $actionstr1 = '"subject":"1 day after","template":"was ended yesterday","templateformat":"1"}';
+        $actionstr2 = '"subject":"1 day before","template":"will end tomorrow","templateformat":"1"}';
+        $actionstr3 = '"subject":"10 days before","template":"will end in 10 days","templateformat":"1"}';
         $standardrules = [
             [
                 'name' => '1dayafter',
                 'conditionname' => 'select_student_in_bo',
                 'conditiondata' => '{"borole":"0"}',
                 'actionname' => 'send_mail',
-                'actiondata' => '{"subject":"1 day after","template":"was ended yesterday","templateformat":"1"}',
+                'actiondata' => $icalstr . $actionstr1,
                 'rulename' => 'rule_daysbefore',
                 'ruledata' => '{"days":"-1","datefield":"selflearningcourseenddate","cancelrules":[]}',
             ],
@@ -482,7 +491,7 @@ final class rules_selflearningcourse_test extends advanced_testcase {
                 'conditionname' => 'select_student_in_bo',
                 'conditiondata' => '{"borole":"0"}',
                 'actionname' => 'send_mail',
-                'actiondata' => '{"subject":"1 day before","template":"will end tomorrow","templateformat":"1"}',
+                'actiondata' => $icalstr . $actionstr2,
                 'rulename' => 'rule_daysbefore',
                 'ruledata' => '{"days":"1","datefield":"selflearningcourseenddate","cancelrules":[]}',
             ],
@@ -491,7 +500,7 @@ final class rules_selflearningcourse_test extends advanced_testcase {
                 'conditionname' => 'select_student_in_bo',
                 'conditiondata' => '{"borole":"0"}',
                 'actionname' => 'send_mail',
-                'actiondata' => '{"subject":"10 days before","template":"will end in 10 days","templateformat":"1"}',
+                'actiondata' => $icalstr . $actionstr3,
                 'rulename' => 'rule_daysbefore',
                 'ruledata' => '{"days":"10","datefield":"selflearningcourseenddate","cancelrules":[]}',
             ],
@@ -507,7 +516,7 @@ final class rules_selflearningcourse_test extends advanced_testcase {
         // Test 1: Standard booking instance.
         // Booking should be possible, no price.
         $returnarray[] = [
-            'courses' => $courses,
+            'coursedata' => $courses,
             'pricecategories' => $standardpricecategories,
             'rules' => $rules,
             'expected' => [

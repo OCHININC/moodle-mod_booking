@@ -45,7 +45,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class isbookable implements bo_condition {
-
     /** @var int $id Standard Conditions have hardcoded ids. */
     public $id = MOD_BOOKING_BO_COND_ISBOOKABLE;
 
@@ -109,10 +108,10 @@ class isbookable implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -167,8 +166,7 @@ class isbookable implements bo_condition {
             $description = $billboardtext;
             // Overwrite Buttontype if needed.
         } else {
-            $description = $this->get_description_string($isavailable, $full, $settings);
-
+            $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
         }
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_NONE, MOD_BOOKING_BO_BUTTON_MYALERT];

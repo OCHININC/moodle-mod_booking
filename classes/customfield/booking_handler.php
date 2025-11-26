@@ -27,6 +27,7 @@ namespace mod_booking\customfield;
 use core_customfield\api;
 use core_customfield\field_controller;
 use mod_booking\settings\optionformconfig\optionformconfig_info;
+use mod_booking\singleton_service;
 use mod_booking\utils\wb_payment;
 use moodle_url;
 use context_system;
@@ -42,11 +43,10 @@ use Throwable;
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class booking_handler extends \core_customfield\handler {
-
     /**
      * @var booking_handler
      */
-    static protected $singleton;
+    protected static $singleton;
 
     /**
      * @var \context
@@ -87,20 +87,34 @@ class booking_handler extends \core_customfield\handler {
     /**
      * Returns the customfields of the mod_booking component.
      *
+     * @param array $selectedshortnames
+     *
      * @return array
      *
      */
-    public static function get_customfields(): array {
+    public static function get_customfields(array $selectedshortnames = []): array {
         global $DB;
 
-        $sql = "SELECT cff.id, cff.name, cff.shortname, cff.configdata
-        FROM {customfield_field} cff
-        LEFT JOIN {customfield_category} cfc
-        ON cff.categoryid = cfc.id
-        WHERE cfc.component = 'mod_booking'
-        ORDER BY cfc.sortorder, cff.sortorder";
+        if (empty($selectedshortnames)) {
+            $sql = "SELECT cff.id, cff.name, cff.shortname, cff.configdata
+                    FROM {customfield_field} cff
+                    LEFT JOIN {customfield_category} cfc
+                    ON cff.categoryid = cfc.id
+                    WHERE cfc.component = 'mod_booking'
+                    ORDER BY cfc.sortorder, cff.sortorder";
+            $params = [];
+        } else {
+            [$insql, $params] = $DB->get_in_or_equal($selectedshortnames, SQL_PARAMS_NAMED, 'param', true);
+            $sql = "SELECT cff.id, cff.name, cff.shortname, cff.configdata
+                    FROM {customfield_field} cff
+                    LEFT JOIN {customfield_category} cfc
+                    ON cff.categoryid = cfc.id
+                    WHERE cfc.component = 'mod_booking'
+                    AND cff.shortname $insql
+                    ORDER BY cfc.sortorder, cff.sortorder";
+        }
 
-        $records = $DB->get_records_sql($sql);
+        $records = $DB->get_records_sql($sql, $params);
 
         return $records;
     }
@@ -185,7 +199,7 @@ class booking_handler extends \core_customfield\handler {
         ?string $headerlangcomponent = null,
         int $contextid = 0,
         array $fieldstoinstanciate = []
-        ) {
+    ) {
 
         global $DB;
 
@@ -196,9 +210,10 @@ class booking_handler extends \core_customfield\handler {
         $lastcategoryid = null;
 
         foreach ($fieldswithdata as $data) {
-
-            if (in_array($data->get_field()->get('shortname'), $uncheckedcustomfields)
-                || (!empty($fieldstoinstanciate) && !in_array($data->get_field()->get('shortname'), $fieldstoinstanciate))) {
+            if (
+                in_array($data->get_field()->get('shortname'), $uncheckedcustomfields)
+                || (!empty($fieldstoinstanciate) && !in_array($data->get_field()->get('shortname'), $fieldstoinstanciate))
+            ) {
                 continue;
             }
 
@@ -212,9 +227,12 @@ class booking_handler extends \core_customfield\handler {
                     $categoryname = get_string($headerlangidentifier, $headerlangcomponent, $categoryname);
                 }
 
-                $mform->addElement('header', 'category_' . $categoryid,
+                $mform->addElement(
+                    'header',
+                    'category_' . $categoryid,
                     '<i class="fa fa-fw fa-puzzle-piece" aria-hidden="true"></i>&nbsp;' .
-                    $categoryname);
+                    $categoryname
+                );
 
                 $lastcategoryid = $categoryid;
             }
@@ -223,8 +241,14 @@ class booking_handler extends \core_customfield\handler {
             if (strlen($field->description)) {
                 // Add field description.
                 $context = $this->get_configuration_context();
-                $value = file_rewrite_pluginfile_urls($field->description, 'pluginfile.php',
-                    $context->id, 'core_customfield', 'description', $field->id);
+                $value = file_rewrite_pluginfile_urls(
+                    $field->description,
+                    'pluginfile.php',
+                    $context->id,
+                    'core_customfield',
+                    'description',
+                    $field->id
+                );
                 $value = format_text($value, $field->descriptionformat, ['context' => $context]);
                 $mform->addElement('static', 'customfield_' . $field->shortname . '_static', '', $value);
             }
@@ -309,7 +333,7 @@ class booking_handler extends \core_customfield\handler {
      * @return \context the context for the given record
      */
     public function get_instance_context(int $instanceid = 0): \context {
-            return context_system::instance();
+        return context_system::instance();
     }
 
     /**
@@ -331,8 +355,12 @@ class booking_handler extends \core_customfield\handler {
             self::MOD_BOOKING_VISIBLETOTEACHERS => get_string('customfield_visibletoteachers', 'core_course'),
             self::MOD_BOOKING_NOTVISIBLE => get_string('customfield_notvisible', 'core_course'),
         ];
-        $mform->addElement('select', 'configdata[visibility]', get_string('customfield_visibility', 'core_course'),
-            $visibilityoptions);
+        $mform->addElement(
+            'select',
+            'configdata[visibility]',
+            get_string('customfield_visibility', 'core_course'),
+            $visibilityoptions
+        );
         $mform->addHelpButton('configdata[visibility]', 'customfield_visibility', 'core_course');
     }
 
@@ -343,7 +371,6 @@ class booking_handler extends \core_customfield\handler {
      * @param array $data
      */
     public function restore_instance_data_from_backup(\restore_task $task, array $data) {
-
     }
 
     /**
@@ -379,7 +406,6 @@ class booking_handler extends \core_customfield\handler {
         $fields = api::get_instance_fields_data($this->get_editable_fields($instanceid), $instanceid);
 
         foreach ($fields as $formfield) {
-
             $shortname = $formfield->get_field()->get('shortname');
             if (isset($instance->{$shortname})) {
                 $instance->{$formfield->get_form_element_name()} = $instance->{$shortname};
@@ -436,5 +462,35 @@ class booking_handler extends \core_customfield\handler {
 
             $elementname = $data->get_form_element_name();
         }
+    }
+
+    /**
+     * Check if forbidden shortnames have been created.
+     * @return string the warning message containing the forbidden shortnames
+     */
+    public function check_for_forbidden_shortnames_and_return_warning(): string {
+        global $DB, $OUTPUT;
+        // Just the first optionid we find.
+        $anyoptionid = $DB->get_field_sql(
+            "SELECT id FROM {booking_options} LIMIT 1"
+        );
+        $settings = singleton_service::get_instance_of_booking_option_settings($anyoptionid);
+        $boproperties = $settings->get_booking_option_properties();
+        $usedshortnames = $DB->get_fieldset_sql(
+            "SELECT DISTINCT cf.shortname
+                        FROM {customfield_field} cf
+                        JOIN {customfield_category} cc
+                          ON cc.id = cf.categoryid
+                       WHERE cc.component = 'mod_booking'"
+        );
+        $forbiddenshortnames = array_intersect($boproperties, $usedshortnames);
+        if (empty($forbiddenshortnames)) {
+            return '';
+        }
+        $forbiddenshortnamesstring = implode(', ', $forbiddenshortnames);
+        return $OUTPUT->notification(
+            get_string('warningcustomfieldsforbiddenshortname', 'mod_booking', $forbiddenshortnamesstring),
+            \core\output\notification::NOTIFY_ERROR
+        );
     }
 }

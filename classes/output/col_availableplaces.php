@@ -27,7 +27,7 @@ namespace mod_booking\output;
 
 use context_module;
 use context_system;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_option_settings;
 use mod_booking\singleton_service;
 use mod_booking\utils\wb_payment;
@@ -45,7 +45,6 @@ use templatable;
  * @license     http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class col_availableplaces implements renderable, templatable {
-
     /** @var booking_answers $bookinganswers instance of class */
     private $bookinganswers = null;
 
@@ -77,8 +76,13 @@ class col_availableplaces implements renderable, templatable {
         $this->buyforuser = $buyforuser;
         $this->bookinganswers = singleton_service::get_instance_of_booking_answers($settings);
 
-        $cmid = $settings->cmid;
-        $optionid = $settings->id;
+        $cmid = $settings->cmid ?? 0;
+        $optionid = $settings->id ?? 0;
+
+        if (empty($cmid) || empty($optionid)) {
+            $bookinginformation['showmanageresponses'] = null;
+            $bookinginformation['manageresponsesurl'] = '';
+        }
 
         $syscontext = context_system::instance();
         $modcontext = context_module::instance($cmid);
@@ -91,7 +95,6 @@ class col_availableplaces implements renderable, templatable {
         );
 
         if ($canviewreport) {
-
             $this->showmanageresponses = true;
 
             // Add a link to redirect to the booking option.

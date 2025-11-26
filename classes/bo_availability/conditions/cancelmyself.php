@@ -158,7 +158,8 @@ class cancelmyself implements bo_condition {
                         ) {
                             $isavailable = true;
                         } else {
-                            $ba = $bookinganswer->usersonwaitinglist[$userid];
+                            $usersonwaitinglist = $bookinganswer->get_usersonwaitinglist();
+                            $ba = $usersonwaitinglist[$userid];
                             if (!empty($ba->json)) {
                                 $jsonobject = json_decode($ba->json);
                                 if (!empty($jsonobject->confirmwaitinglist)) {
@@ -192,10 +193,10 @@ class cancelmyself implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -240,7 +241,7 @@ class cancelmyself implements bo_condition {
 
         $isavailable = $this->is_available($settings, $userid, $not);
         if (!class_exists('local_shopping_cart\shopping_cart')) {
-            $description = $this->get_description_string($isavailable, $full, $settings);
+            $description = $this->get_description_string();
         } else {
             $description = 'sc cancel';
         }
@@ -309,7 +310,7 @@ class cancelmyself implements bo_condition {
 
             if (
                 !empty((float)($price['price'] ?? 0))
-                || !empty(get_config('mod_booking', 'displayemptyprice'))
+                || !empty(get_config('booking', 'displayemptyprice'))
             ) {
                 // Get the booking answers for this instance.
                 $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
@@ -338,17 +339,18 @@ class cancelmyself implements bo_condition {
         }
 
         $label = $this->get_description_string();
-            return bo_info::render_button(
-                $settings,
-                $userid,
-                $label,
-                'btn btn-light btn-sm',
-                false,
-                $fullwidth,
-                'button',
-                'option',
-                false
-            );
+
+        return bo_info::render_button(
+            $settings,
+            $userid,
+            $label,
+            'btn btn-light btn-sm',
+            false,
+            $fullwidth,
+            'button',
+            'option',
+            false
+        );
     }
 
     /**
@@ -356,7 +358,7 @@ class cancelmyself implements bo_condition {
      *
      * @return string
      */
-    private function get_description_string() {
+    private function get_description_string(): string {
 
         // Do not trigger billboard here.
         return get_string('cancelsign', 'mod_booking') . "&nbsp;" .
@@ -369,12 +371,13 @@ class cancelmyself implements bo_condition {
      * @param int $userid
      * @return bool
      */
-    public static function apply_coolingoff_period($settings, $userid) {
+    public static function apply_coolingoff_period($settings, $userid): bool {
 
         $coolingoffperiod = get_config('booking', 'coolingoffperiod');
         if ($coolingoffperiod > 0) {
             $ba = singleton_service::get_instance_of_booking_answers($settings);
-            $timemodified = $ba->users[$userid]->timemodified ?? 0;
+            $answersusers = $ba->get_users();
+            $timemodified = $answersusers[$userid]->timemodified ?? 0;
             if (strtotime("+ $coolingoffperiod seconds", $timemodified) > time()) {
                 return true;
             }

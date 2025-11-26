@@ -180,10 +180,10 @@ class nooverlappingproxy implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -398,7 +398,7 @@ class nooverlappingproxy implements bo_condition {
                 $userid = $USER->id;
             }
 
-            $title = $bookinoption->text;
+            $title = $bookinoption->get_title_with_prefix();
             $url = new moodle_url($CFG->wwwroot . '/mod/booking/optionview.php', [
                 'cmid' => $booking->cmid,
                 'optionid' => $optionid,
@@ -432,7 +432,6 @@ class nooverlappingproxy implements bo_condition {
         $conditionobject = new stdClass();
 
         if (!empty($fromform->bo_cond_nooverlapping_restrict)) {
-
             $classname = __CLASS__;
             $classnameparts = explode('\\', $classname);
             $shortclassname = end($classnameparts);

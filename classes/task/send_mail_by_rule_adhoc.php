@@ -43,7 +43,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class send_mail_by_rule_adhoc extends \core\task\adhoc_task {
-
     /**
      * Get task name.
      *
@@ -85,18 +84,32 @@ class send_mail_by_rule_adhoc extends \core\task\adhoc_task {
 
             // The first check needs to be if the rule has changed at all, eg. in any of the set values.
             if (
-                $ruleinstance->rulename === 'rule_daysbefore'
-                && ($taskdata->rulejson !== $ruleinstance->rulejson)
+                $taskdata->rulejson !== $ruleinstance->rulejson
             ) {
-                mtrace(
-                    'send_mail_by_rule_adhoc task: Rule has changed. Mail was NOT SENT for option.'
-                    . $taskdata->optionid
-                    . ' and user '
-                    . $taskdata->userid
-                    .  PHP_EOL
-                    . 'This message is expected and not signn of malfunction.'
-                );
-                return;
+                $abort = false;
+                if ($ruleinstance->rulename === 'rule_daysbefore') {
+                    $abort = true;
+                } else {
+                    $td = json_decode($taskdata->rulejson);
+                    $rd = json_decode($ruleinstance->rulejson);
+                    if (
+                        $td->actiondata != $rd->actiondata
+                        || $td->ruledata != $rd->ruledata
+                    ) {
+                        $abort = true;
+                    }
+                }
+                if ($abort) {
+                    mtrace(
+                        'send_mail_by_rule_adhoc task: Rule has changed. Mail was NOT SENT for option.'
+                        . $taskdata->optionid
+                        . ' and user '
+                        . $taskdata->userid
+                        .  PHP_EOL
+                        . 'This message is expected and not signn of malfunction.'
+                    );
+                    return;
+                }
             }
 
             // We replace the rulejson if it's already provided by the task.
@@ -142,6 +155,7 @@ class send_mail_by_rule_adhoc extends \core\task\adhoc_task {
                     $taskdata->duedate ?? 0,
                     $taskdata->price ?? 0,
                     $taskdata->rulejson ?? 0,
+                    $taskdata->ruleid ?? 0  // Send the ruleid as rulejson often seems to not work.
                 );
             } catch (Exception $e) {
                 if (get_config('booking', 'bookingdebugmode')) {
@@ -171,10 +185,10 @@ class send_mail_by_rule_adhoc extends \core\task\adhoc_task {
                 mtrace('send_mail_by_rule_adhoc task: mail could not be sent for option ' . $taskdata->optionid . ' to user '
                 . $taskdata->userid);
             }
-
         } else {
             throw new \coding_exception(
-                    'send_mail_by_rule_adhoc task: ERROR - missing taskdata.');
+                'send_mail_by_rule_adhoc task: ERROR - missing taskdata.'
+            );
         }
     }
 }

@@ -106,7 +106,7 @@ class teachers_handler {
             'tags' => false,
             'multiple' => true,
             'noselectionstring' => '',
-            'ajax' => 'mod_booking/form_users_selector',
+            'ajax' => 'mod_booking/form_teachers_selector',
             'valuehtmlcallback' => function ($value) {
                 global $OUTPUT;
                 if (empty($value)) {
@@ -114,10 +114,10 @@ class teachers_handler {
                 }
                 $user = singleton_service::get_instance_of_user((int)$value);
                 $details = [
-                    'id' => $user->id,
-                    'email' => $user->email,
-                    'firstname' => $user->firstname,
-                    'lastname' => $user->lastname,
+                    'id' => $user->id ?? 0,
+                    'email' => $user->email ?? '',
+                    'firstname' => $user->firstname ?? '',
+                    'lastname' => $user->lastname ?? '',
                 ];
                 return $OUTPUT->render_from_template(
                     'mod_booking/form-user-selector-suggestion',
@@ -179,7 +179,11 @@ class teachers_handler {
      */
     public function set_data(stdClass &$data) {
 
-        if (!empty($this->optionid) && $this->optionid > 0) {
+        if (
+            !isset($data->{MOD_BOOKING_FORM_TEACHERS})
+            && !empty($this->optionid)
+            && $this->optionid > 0
+        ) {
             $optionsettings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
             $teachers = $optionsettings->teachers;
             $teacherids = [];
@@ -216,6 +220,9 @@ class teachers_handler {
         }
 
         foreach ($teacherids as $newteacherid) {
+            if (empty($newteacherid)) {
+                continue;
+            }
             $dosubscribe = true;
             if (in_array($newteacherid, $oldteacherids)) {
                 // Teacher is already subscribed to booking option.
@@ -257,7 +264,14 @@ class teachers_handler {
         foreach ($oldteacherids as $oldteacherid) {
             if (!in_array($oldteacherid, $teacherids)) {
                 // The teacher has been removed.
-                if (!self::unsubscribe_teacher_from_booking_option($oldteacherid, $this->optionid, $optionsettings->cmid)) {
+                if (
+                    !empty($oldteacherid)
+                    && !self::unsubscribe_teacher_from_booking_option(
+                        $oldteacherid,
+                        $this->optionid,
+                        $optionsettings->cmid
+                    )
+                ) {
                     throw new moodle_exception(
                         'cannotremovesubscriber',
                         'booking',
@@ -301,11 +315,14 @@ class teachers_handler {
             // Always enrol into current course with defined role.
             $teacherrole = get_config('booking', 'definedteacherrole');
             if ($teacherrole) {
-                $option->enrol_user($userid, true, $teacherrole, true, $COURSE->id);
+                $option->enrol_user($userid, true, $teacherrole, true, $bookingsettings->course);
             }
 
             // Even if teacher already exists in DB, we still might want to enrol him/her into a NEW course.
-            if ($doenrol) {
+            if (
+                $doenrol
+                && !empty($bookingsettings->teacherroleid)
+            ) {
                 // We enrol teacher with the type defined in settings.
                 $option->enrol_user($userid, true, $bookingsettings->teacherroleid, true, $courseid);
 
@@ -577,21 +594,21 @@ class teachers_handler {
     /**
      * This function can retrieve the userids from a string with either emails or usernames.
      *
-     * @param mixed $userstring
+     * @param string|array $users string can contain userids, emails or usernames, can also be already an array of userids
      * @param bool $email // if false, it's usernames, not usermails.
      * @param bool $throwerror If not finding the email should throw an error.
      * @return array
      */
-    public static function get_user_ids_from_string($userstring, $email = true, $throwerror = false) {
+    public static function get_user_ids_from_string($users, $email = true, $throwerror = false) {
 
         global $DB;
 
-        if (empty($userstring)) {
+        if (empty($users)) {
             return [];
         }
         // First we explode teacheremail, there might be mulitple teachers.
         // We always use comma as separator.
-        $teacheremails = array_map('strtolower', explode(',', $userstring)); // Convert input to lowercase.
+        $teacheremails = array_map('strtolower', explode(',', $users)); // Convert input to lowercase.
         $column = $email ? 'LOWER(email)' : 'LOWER(username)';  // Ensure case-insensitive comparison.
 
         [$inorequal, $params] = $DB->get_in_or_equal($teacheremails, SQL_PARAMS_NAMED);

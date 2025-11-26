@@ -25,26 +25,36 @@
 
 namespace mod_booking;
 
-use cache;
 use cache_helper;
 use coding_exception;
 use completion_info;
+use context_course;
 use context_module;
 use context_system;
 use context;
+use core\task\manager;
 use dml_exception;
 use Exception;
 use html_writer;
 use invalid_parameter_exception;
 use local_entities\entitiesrelation_handler;
 use mod_booking\bo_availability\conditions\customform;
+use mod_booking\bo_availability\conditions\optionhasstarted;
+use mod_booking\event\booking_debug;
 use mod_booking\event\booking_rulesexecutionfailed;
+use mod_booking\event\bookinganswer_presencechanged;
+use mod_booking\event\bookinganswer_notesedited;
 use mod_booking\event\bookinganswer_waitingforconfirmation;
 use mod_booking\event\bookingoption_bookedviaautoenrol;
+use mod_booking\local\confirmationworkflow\confirmation;
 use mod_booking\option\dates_handler;
 use mod_booking\bo_actions\actions_info;
 use mod_booking\bo_availability\bo_info;
 use mod_booking\booking_rules\rules_info;
+use mod_booking\option\fields\certificate;
+use mod_booking\option\fields\sharedplaces;
+use mod_booking\option\fields\competencies;
+use mod_booking\task\assign_competency;
 use stdClass;
 use moodle_url;
 use mod_booking\booking_utils;
@@ -60,9 +70,9 @@ use mod_booking\option\fields_info;
 use mod_booking\placeholders\placeholders_info;
 use mod_booking\subbookings\subbookings_info;
 use mod_booking\task\send_completion_mails;
+use mod_booking\booking_answers\booking_answers;
 use moodle_exception;
-use MoodleQuickForm;
-
+use Throwable;
 use function get_config;
 
 defined('MOODLE_INTERNAL') || die();
@@ -165,8 +175,22 @@ class booking_option {
         $this->booking = singleton_service::get_instance_of_booking_by_cmid($cmid);
 
         if (empty($this->settings->id)) {
+            $message = "ERROR: Option $optionid, cmid $cmid could not be created. Most probably, the option was deleted from DB.";
+            if (get_config('booking', 'bookingdebugmode')) {
+                global $USER;
+                $event = booking_debug::create([
+                    'objectid' => $optionid,
+                    'context' => context_system::instance(),
+                    'relateduserid' => $USER->id,
+                    'other' => [
+                        'message' => $message,
+                    ],
+                ]);
+                $event->trigger();
+            }
+
             debugging(
-                'ERROR: Option settings could not be created. Most probably, the option was deleted from DB.',
+                $message,
                 DEBUG_DEVELOPER
             );
             return;
@@ -195,11 +219,11 @@ class booking_option {
      * @param int $optionid
      * @param ?int $bookingid booking id
      *
-     * @return booking_option
+     * @return ?booking_option
      * @throws coding_exception
      * @throws dml_exception
      */
-    public static function create_option_from_optionid(int $optionid, ?int $bookingid = null) {
+    public static function create_option_from_optionid(int $optionid, ?int $bookingid = null): ?booking_option {
         global $DB;
 
         if (empty($bookingid)) {
@@ -398,7 +422,7 @@ class booking_option {
      */
     public function get_all_users() {
         $bookinganswers = singleton_service::get_instance_of_booking_answers($this->settings);
-        return $bookinganswers->users;
+        return $bookinganswers->get_users();
     }
 
     /**
@@ -408,7 +432,7 @@ class booking_option {
      */
     public function get_all_users_on_waitinglist(): array {
         $bookinganswers = singleton_service::get_instance_of_booking_answers($this->settings);
-        return $bookinganswers->usersonwaitinglist;
+        return $bookinganswers->get_usersonwaitinglist();
     }
 
     /**
@@ -418,7 +442,7 @@ class booking_option {
      */
     public function get_all_users_booked() {
         $bookinganswers = singleton_service::get_instance_of_booking_answers($this->settings);
-        return $bookinganswers->usersonlist;
+        return $bookinganswers->get_usersonlist();
     }
 
     /**
@@ -547,17 +571,24 @@ class booking_option {
         }
 
         $sql = "SELECT $mainuserfields, ba.id AS answerid, ba.optionid, ba.bookingid
-                 FROM {booking_answers} ba, {user} u
-                WHERE ba.userid = u.id
-                  AND u.deleted = 0
-                  AND ba.optionid = :optionid
-                  AND ba.waitinglist = 0
-             ORDER BY ba.timemodified ASC";
+                  FROM {booking_answers} ba, {user} u
+                 WHERE ba.userid = u.id
+                   AND u.deleted = 0
+                   AND ba.optionid = :optionid
+                   AND ba.waitinglist = 0
+              ORDER BY ba.timemodified ASC";
 
         $params = ["optionid" => $this->optionid];
 
         // Note: mod/booking:choose may have been revoked after the user has booked: not count them as booked.
-        $allanswers = $DB->get_records_sql($sql, $params);
+        $recordset = $DB->get_recordset_sql($sql, $params);
+        $allanswers = [];
+        foreach ($recordset as $record) {
+            if (!isset($allanswers[$record->id])) {
+                $allanswers[$record->id] = $record; // The $record->id is the u.id .
+            }
+        }
+        $recordset->close();
 
         // If $bookanyone is true, we do not check for enrolment.
         $this->bookedusers = $bookanyone ? $allanswers : array_intersect_key($allanswers, $this->booking->canbookusers);
@@ -569,7 +600,7 @@ class booking_option {
             groups_get_activity_groupmode($this->booking->cm) == SEPARATEGROUPS &&
                  !has_capability(
                      'moodle/site:accessallgroups',
-                     \context_course::instance($this->booking->course->id)
+                     context_course::instance($this->booking->course->id)
                  )
         ) {
             $mygroups = groups_get_all_groups($this->booking->course->id, $USER->id);
@@ -577,14 +608,15 @@ class booking_option {
             [$insql, $inparams] = $DB->get_in_or_equal($mygroupids, SQL_PARAMS_NAMED, 'grp', true, -1);
 
             $sql = "SELECT $mainuserfields, ba.id AS answerid, ba.optionid, ba.bookingid
-            FROM {booking_answers} ba, {user} u, {groups_members} gm
-            WHERE ba.userid = u.id AND
-            u.deleted = 0 AND
-            ba.optionid = :optionid AND
-            u.id = gm.userid AND gm.groupid $insql AND
-            ba.waitinglist = 0
-            GROUP BY u.id
-            ORDER BY ba.timemodified ASC";
+                      FROM {booking_answers} ba, {user} u, {groups_members} gm
+                     WHERE ba.userid = u.id
+                       AND u.deleted = 0
+                       AND ba.optionid = :optionid
+                       AND ba.waitinglist = 0
+                       AND u.id = gm.userid
+                       AND gm.groupid $insql
+                  GROUP BY u.id
+                  ORDER BY ba.timemodified ASC";
             $groupmembers = $DB->get_records_sql($sql, array_merge($params, $inparams));
             $this->bookedusers = array_intersect_key($groupmembers, $this->booking->canbookusers);
             $this->bookedvisibleusers = $this->bookedusers;
@@ -636,8 +668,9 @@ class booking_option {
         $options = $booking->get_all_options();
         foreach ($options as $option) {
             $answers = booking_answers::get_instance_from_optionid($option->id);
-            if (!empty($answers->users)) {
-                foreach ($answers->users as $user) {
+            $answersusers = $answers->get_users();
+            if (!empty($answersusers)) {
+                foreach ($answersusers as $user) {
                     if ((int)$user->completed === 1) {
                         $todelete[] = $user->id;
                     }
@@ -680,6 +713,8 @@ class booking_option {
      *     after the whole booking option was cancelled, false by default
      * @param bool $syncwaitinglist set this to false, if you do not want to sync_waiting_list here (avoid recursions)
      * @param bool $deleteall set this to true if you want to delete a complete answers too
+     * @param bool $openruleexecution saves a timestamp as a flag in the record that there might still be a...
+     * Corresponding rule not executed (because this was triggered by a service provider and rules had no time to be executed yet)
      * @return bool true if booking was deleted successfully, otherwise false
      */
     public function user_delete_response(
@@ -687,7 +722,8 @@ class booking_option {
         $cancelreservation = false,
         $bookingoptioncancel = false,
         $syncwaitinglist = true,
-        $deleteall = false
+        $deleteall = false,
+        $openruleexecution = false
     ) {
         global $USER, $DB;
 
@@ -700,11 +736,6 @@ class booking_option {
             $fullybooked = true;
         } else {
             $fullybooked = false;
-        }
-
-        // If waitforconfirmation is turned on, we will never sync waitinglist (we do it manually).
-        if (!empty($optionsettings->waitforconfirmation)) {
-            $syncwaitinglist = false;
         }
 
         // Delete all booked options including completed.
@@ -720,6 +751,11 @@ class booking_option {
         }
 
         if ($cancelreservation) {
+            $ba = singleton_service::get_instance_of_booking_answers($optionsettings);
+            // All answers, fetch for user.
+
+            // Make sure to log this operation into the booking_history table.
+            // self::booking_history_insert($result->waitinglist, $result->id, $result->optionid, $result->booking, $userid);.
             $DB->delete_records(
                 'booking_answers',
                 [
@@ -730,18 +766,30 @@ class booking_option {
                 ]
             );
         } else {
+            // Normally, we will have only one record which is not deleted or previously booked.
+            // But we still fetch an array to make sure of it.
+            // We skip all the records which are already deleted or previously booked.
+            // And then we update the records with status param deleted which are not yet deleted or previously booked.
             foreach ($results as $result) {
-                if ($result->waitinglist != MOD_BOOKING_STATUSPARAM_DELETED) {
+                if (
+                    !in_array($result->waitinglist, [MOD_BOOKING_STATUSPARAM_DELETED, MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED])
+                ) {
                     $result->waitinglist = MOD_BOOKING_STATUSPARAM_DELETED;
                     $result->timemodified = time();
+                    $result->openruleexecution = $openruleexecution ? time() : 0;
                     // We mark all the booking answers as deleted.
                     $DB->update_record('booking_answers', $result);
-
                     // Also delete corresponding entries in booking_optiondates_answers table.
                     $DB->delete_records(
                         'booking_optiondates_answers',
                         ['userid' => $result->userid, 'optionid' => $result->optionid]
                     );
+                    $ba = singleton_service::get_instance_of_booking_answers($optionsettings);
+                    $answersusers = $ba->get_users();
+                    $useranswer = $answersusers[$userid];
+                    $status = self::status_bookinganswer_deleted($useranswer);
+                    // Make sure to log this operation into the booking_history table.
+                    self::booking_history_insert($status, $result->id, $result->optionid, $result->bookingid, $userid);
                 }
             }
         }
@@ -858,14 +906,9 @@ class booking_option {
             $transferred->success = true;
             [$insql, $inparams] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, "limit_");
 
-            if ($CFG->version >= 2021051700) {
-                // This only works in Moodle 3.11 and later.
-                $mainuserfields = \core_user\fields::for_name()->get_sql('u')->selects;
-                $mainuserfields = trim($mainuserfields, ', ');
-            } else {
-                // This is only here to support Moodle versions earlier than 3.11.
-                $mainuserfields = get_all_user_name_fields(true, 'u');
-            }
+            // This only works in Moodle 3.11 and later.
+            $mainuserfields = \core_user\fields::for_name()->get_sql('u')->selects;
+            $mainuserfields = trim($mainuserfields, ', ');
 
             $sql = 'SELECT ba.userid AS id,
                 ba.timecreated,
@@ -888,7 +931,13 @@ class booking_option {
         }
         if (!empty($transferred->yes)) {
             foreach ($transferred->yes as $user) {
-                $this->user_delete_response($user->id);
+                if (is_object($user) && isset($user->id)) {
+                    $userid = (int)$user->id;
+                    $this->user_delete_response($userid);
+                } else {
+                    // Should never happen.
+                    throw new moodle_exception('Unexpected data structure in transferred users.');
+                }
             }
         }
 
@@ -897,24 +946,39 @@ class booking_option {
 
     /**
      * "Sync" users on waiting list, based on edited option - if has limit or not.
+     * @param bool $syncshared
+     * @param bool $optionupdated
+     *
+     * @return bool
+     *
      */
-    public function sync_waiting_list() {
+    public function sync_waiting_list($syncshared = false, $optionupdated = false) {
         global $USER;
 
         $context = context_module::instance(($this->cmid));
         $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
+        $optionhasstarted = new optionhasstarted();
 
-        // If waiting list is turned off globally, we return right away.
+        $result = false;
+
         if (
-            get_config('booking', 'turnoffwaitinglist') ||
-            (get_config('booking', 'turnoffwaitinglistaftercoursestart') && time() > $settings->coursestarttime)
+            // If waiting list is turned off globally...
+            // ... or optionhasstarted does not allow users to be booked after the start of the option..
+            get_config('booking', 'turnoffwaitinglist')
+            || (get_config('booking', 'turnoffwaitinglistaftercoursestart') && time() > $settings->coursestarttime)
+            || !$optionhasstarted->is_available($settings, 0)
         ) {
-            return;
+            // ... we return right away.
+            return false;
         }
 
-        // If the booking option has a price, we don't sync waitinglist.
-        if (!empty($settings->jsonobject->useprice)) {
-            return;
+        // Here, we check if we need to sync another option than the present one.
+        // It's a feature of the sharedplaces functionality...
+        // ... here we count booked places over multiple options.
+        // One of these options can have priority. If so, we don't sync this option, but the other one.
+
+        if ($result = sharedplaces::sync_sharedplaces_options($settings->id, true)) {
+            return $result;
         }
 
         $ba = singleton_service::get_instance_of_booking_answers($settings);
@@ -922,26 +986,54 @@ class booking_option {
         // If there is no waiting list, we do not do anything!
         if ($settings->limitanswers && !empty($settings->maxanswers)) {
             // 1. Update, enrol and inform users who have switched from the waiting list to status "booked".
-            $usersonwaitinglist = array_replace([], $ba->usersonwaitinglist);
+            $usersonwaitinglist = array_replace([], $ba->get_usersonwaitinglist());
             $noofuserstobook =
                 $settings->maxanswers
-                - booking_answers::count_places($ba->usersonlist)
-                - booking_answers::count_places($ba->usersreserved);
+                - booking_answers::count_places($ba->get_usersonlist())
+                - booking_answers::count_places($ba->get_usersreserved());
 
             // We want to enrol people who have been waiting longer first.
             usort($usersonwaitinglist, fn($a, $b) => $a->timemodified < $b->timemodified ? -1 : 1);
-            if ($noofuserstobook > 0 && !empty($ba->usersonwaitinglist)) {
+            if ($noofuserstobook > 0 && !empty($ba->get_usersonwaitinglist())) {
+                // We delete the booking answers cache - because settings (limits, etc.) could be changed!
+                self::purge_cache_for_answers($this->optionid);
+
                 while ($noofuserstobook > 0) {
                     $noofuserstobook--; // Decrement.
                     $currentanswer = array_shift($usersonwaitinglist);
                     if (empty($currentanswer->userid)) {
                         continue;
                     }
+
+                    if (!empty($settings->waitforconfirmation)) {
+                        // If we wait for confirmation, we do not book users from waiting list automatically.
+                        $confirmationcount = confirmation::get_required_confirmation_count($settings->id);
+                        $jsonobject = empty($currentanswer->json) ? (object)[] : json_decode($currentanswer->json);
+                        $userconfirmationcount = $jsonobject->confirmationcount ?? 0;
+                        if ($userconfirmationcount < $confirmationcount) {
+                            continue;
+                        }
+                    }
+
                     $user = singleton_service::get_instance_of_user($currentanswer->userid);
-                    $this->user_submit_response($user, 0, 0, 0, MOD_BOOKING_VERIFIED);
+
+                    // If the booking option has a price, we don't sync waitinglist.
+                    $price = price::get_price('option', $settings->id, $user);
+                    if (
+                        !empty($settings->jsonobject->useprice) // This is important to check first!
+                        && isset($price["price"])
+                        && !empty((float)$price["price"])
+                    ) {
+                        continue;
+                    }
+
+                    // We delete the booking answers cache - because settings (limits, etc.) could be changed!
+                    self::purge_cache_for_answers($this->optionid);
+
+                    $result = $this->user_submit_response($user, 0, 0, 0, MOD_BOOKING_VERIFIED);
                     $this->enrol_user_coursestart($currentanswer->userid);
 
-                    // Before sending, we delete the booking answers cache!
+                    // Before sending, we delete the booking answers cache again.
                     self::purge_cache_for_answers($this->optionid);
                     $messagecontroller = new message_controller(
                         MOD_BOOKING_MSGCONTRPARAM_QUEUE_ADHOC,
@@ -954,68 +1046,108 @@ class booking_option {
                     $messagecontroller->send_or_queue();
                 }
             }
-
-            // 2. Update and inform users who have been put on the waiting list because of changed limits.
-            $usersonlist = array_merge($ba->usersonlist, $ba->usersreserved);
-            usort($usersonlist, fn($a, $b) => $a->timemodified < $b->timemodified ? -1 : 1);
-            while (booking_answers::count_places($usersonlist) > $settings->maxanswers) {
-                $currentanswer = array_pop($usersonlist);
-                array_push($usersonwaitinglist, $currentanswer);
-
-                $user = singleton_service::get_instance_of_user($currentanswer->userid);
-                $this->user_submit_response($user, 0, 0, 0, MOD_BOOKING_VERIFIED);
-                $this->unenrol_user($currentanswer->userid);
-
-                // Before sending, we delete the booking answers cache!
-                self::purge_cache_for_answers($this->optionid);
-                $messagecontroller = new message_controller(
-                    MOD_BOOKING_MSGCONTRPARAM_QUEUE_ADHOC,
-                    MOD_BOOKING_MSGPARAM_STATUS_CHANGED,
-                    $this->cmid,
-                    $this->optionid,
-                    $currentanswer->userid,
-                    $this->bookingid
-                );
-                $messagecontroller->send_or_queue();
+            if (!$syncshared) {
+                sharedplaces::sync_sharedplaces_options($settings->id, false);
             }
 
-            // 3. If users drop out of the waiting list because of changed limits, delete and inform them.
-            while (booking_answers::count_places($usersonwaitinglist) > $settings->maxoverbooking) {
-                $currentanswer = array_pop($usersonwaitinglist);
-                // The fourth param needs to be false here, so we do not run into a recursion.
-                $this->user_delete_response($currentanswer->userid, false, false, false);
-
-                $event = bookinganswer_cancelled::create([
-                    'objectid' => $this->optionid,
-                    'context' => $context,
-                    'userid' => $USER->id, // The user who did cancel.
-                    'relateduserid' => $currentanswer->userid, // Affected user - the user who was cancelled.
-                    'other' => [
-                        'extrainfo' => 'Answer deleted by sync_waiting_list.',
-                    ],
-                ]);
-                $event->trigger();
-
-                // Before sending, we delete the booking answers cache!
+            if (
+                $optionupdated
+                && has_capability('mod/booking:deleteresponses', $context)
+                && !get_config('booking', 'keepusersbookedonreducingmaxanswers')
+            ) {
+                // 2. Update and inform users who have been put on the waiting list because of changed limits.
+                $usersonlist = array_merge($ba->get_usersonlist(), $ba->get_usersreserved());
+                usort($usersonlist, fn($a, $b) => $a->timemodified < $b->timemodified ? -1 : 1);
+                // We delete the booking answers cache - because settings (limits, etc.) could be changed!
                 self::purge_cache_for_answers($this->optionid);
-                $messagecontroller = new message_controller(
-                    MOD_BOOKING_MSGCONTRPARAM_QUEUE_ADHOC,
-                    MOD_BOOKING_MSGPARAM_CANCELLED_BY_TEACHER_OR_SYSTEM,
-                    $this->cmid,
-                    $this->optionid,
-                    $currentanswer->userid,
-                    $this->bookingid
-                );
-                $messagecontroller->send_or_queue();
+
+                while (booking_answers::count_places($usersonlist) > $settings->maxanswers) {
+                    $currentanswer = array_pop($usersonlist);
+                    array_push($usersonwaitinglist, $currentanswer);
+
+                    $user = singleton_service::get_instance_of_user($currentanswer->userid);
+
+                    // If the booking option has a price, we don't sync waitinglist.
+                    $price = price::get_price('option', $settings->id, $user);
+                    if (
+                        !empty($settings->jsonobject->useprice) // This is important to check first!
+                        && isset($price["price"])
+                        && !empty((float)$price["price"])
+                    ) {
+                        continue;
+                    }
+
+                    // We delete the booking answers cache - because settings (limits, etc.) could be changed!
+                    self::purge_cache_for_answers($this->optionid);
+
+                    $this->user_submit_response($user, 0, 0, 0, MOD_BOOKING_VERIFIED);
+                    $this->unenrol_user($currentanswer->userid);
+
+                    // Before sending, we delete the booking answers cache again.
+                    self::purge_cache_for_answers($this->optionid);
+                    $messagecontroller = new message_controller(
+                        MOD_BOOKING_MSGCONTRPARAM_QUEUE_ADHOC,
+                        MOD_BOOKING_MSGPARAM_STATUS_CHANGED,
+                        $this->cmid,
+                        $this->optionid,
+                        $currentanswer->userid,
+                        $this->bookingid
+                    );
+                    $messagecontroller->send_or_queue();
+                }
+
+                // 3. If users drop out of the waiting list because of changed limits, delete and inform them.
+                while (booking_answers::count_places($usersonwaitinglist) > $settings->maxoverbooking) {
+                    $currentanswer = array_pop($usersonwaitinglist);
+                    // The fourth param needs to be false here, so we do not run into a recursion.
+                    $this->user_delete_response($currentanswer->userid, false, false, false);
+
+                    $event = bookinganswer_cancelled::create([
+                        'objectid' => $this->optionid,
+                        'context' => $context,
+                        'userid' => $USER->id, // The user who did cancel.
+                        'relateduserid' => $currentanswer->userid, // Affected user - the user who was cancelled.
+                        'other' => [
+                            'extrainfo' => 'Answer deleted by sync_waiting_list.',
+                        ],
+                    ]);
+                    $event->trigger();
+
+                    // Before sending, we delete the booking answers cache!
+                    self::purge_cache_for_answers($this->optionid);
+                    $messagecontroller = new message_controller(
+                        MOD_BOOKING_MSGCONTRPARAM_QUEUE_ADHOC,
+                        MOD_BOOKING_MSGPARAM_CANCELLED_BY_TEACHER_OR_SYSTEM,
+                        $this->cmid,
+                        $this->optionid,
+                        $currentanswer->userid,
+                        $this->bookingid
+                    );
+                    $messagecontroller->send_or_queue();
+                }
             }
         } else {
             // If option was set to unlimited, we book all users that have been on the waiting list and inform them.
-            foreach ($ba->usersonwaitinglist as $currentanswer) {
+            foreach ($ba->get_usersonwaitinglist() as $currentanswer) {
                 $user = singleton_service::get_instance_of_user($currentanswer->userid);
+
+                // If the booking option has a price, we don't sync waitinglist.
+                $price = price::get_price('option', $settings->id, $user);
+                if (
+                    !empty($settings->jsonobject->useprice) // This is important to check first!
+                    && isset($price["price"])
+                    && !empty((float)$price["price"])
+                ) {
+                    continue;
+                }
+
+                // We delete the booking answers cache - because settings (limits, etc.) could be changed!
+                self::purge_cache_for_answers($this->optionid);
+
                 $this->user_submit_response($user, 0, 0, 0, MOD_BOOKING_VERIFIED);
                 $this->enrol_user_coursestart($currentanswer->userid);
 
-                // Before sending, we delete the booking answers cache!
+                // Before sending, we delete the booking answers cache again.
                 self::purge_cache_for_answers($this->optionid);
                 $messagecontroller = new message_controller(
                     MOD_BOOKING_MSGCONTRPARAM_QUEUE_ADHOC,
@@ -1028,6 +1160,8 @@ class booking_option {
                 $messagecontroller->send_or_queue();
             }
         }
+        // We need the return value only in a specific context.
+        return $result;
     }
 
     /**
@@ -1066,6 +1200,7 @@ class booking_option {
      * @param int $status 1 added to shopping cart, 2 for confirmation. See MOD_BOOKING_BO_SUBMIT_STATUS_*
      * @param int $verified 0 for unverified, 1 for pending and 2 for verified.
      * @param string $erlid the identifier of the enrollink, if given
+     * @param int $timebooked the timestamp when the booking was made
      * @return bool true if booking was possible, false if meanwhile the booking got full
      */
     public function user_submit_response(
@@ -1074,7 +1209,8 @@ class booking_option {
         $subtractfromlimit = 0,
         $status = MOD_BOOKING_BO_SUBMIT_STATUS_DEFAULT,
         $verified = MOD_BOOKING_UNVERIFIED,
-        $erlid = ""
+        $erlid = "",
+        $timebooked = 0
     ) {
 
         global $USER;
@@ -1088,24 +1224,36 @@ class booking_option {
         }
 
         if (empty($this->option)) {
-            echo "<br>Didn't find option to subscribe user $user->id <br>";
             return false;
         }
 
-        // We check if we can still book the user.
-        // False means, that it can't be booked.
-        // 0 means, that we can book right away
-        // 1 means, that there is only a place on the waiting list.
-        $waitinglist = $this->check_if_limit($user->id, self::option_allows_overbooking_for_user($this->optionid, $user->id));
-        // With the second param, we check if overbooking is allowed.
+        $isavailable = self::option_allows_booking_for_user($this->optionid, $user->id);
+        switch ($status) {
+            case MOD_BOOKING_BO_SUBMIT_STATUS_BOOKOTHEROPTION_FORCE:
+                $waitinglist = MOD_BOOKING_STATUSPARAM_BOOKED;
+                break;
+            case MOD_BOOKING_BO_SUBMIT_STATUS_BOOKOTHEROPTION_CONDITIONS_BLOCKING:
+                // Return if any condition is blocking.
+                if (!$isavailable) {
+                    return false;
+                };
+                $waitinglist = MOD_BOOKING_STATUSPARAM_BOOKED;
+                break;
+            default:
+                // We check if we can still book the user.
+                // False means, that it can't be booked.
+                // 0 means, that we can book right away
+                // 1 means, that there is only a place on the waiting list.
+                // With the second param, we check if overbooking is allowed.
+                $waitinglist = $this->check_if_limit(
+                    $user->id,
+                    $isavailable,
+                    $status
+                );
+        }
 
-        // The $status == 2 means confirm. Under some circumstances, waitinglist can be false here.
+        // Under some circumstances, waitinglist can be false here.
         if ($waitinglist === false && $status != MOD_BOOKING_BO_SUBMIT_STATUS_CONFIRMATION) {
-            // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
-            // TODO: introduce an "allowoverbooking" param into the availability JSON.
-            // If the JSON contains it, we want to allow overbooking even without a waiting list.
-            // TOOD: It has to be added to the override conditions mform elements as a checkbox.
-
             // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
             /* echo "Couldn't subscribe user $user->id because of full waitinglist <br>";*/
             return false;
@@ -1119,8 +1267,12 @@ class booking_option {
             case MOD_BOOKING_BO_SUBMIT_STATUS_UN_CONFIRM: // Means unconfirm on waitinglist.
                 $waitinglist = MOD_BOOKING_STATUSPARAM_WAITINGLIST;
                 break;
-            case MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL: // Means autoenrol.
+            case MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL:
+            case MOD_BOOKING_BO_SUBMIT_STATUS_BOOKOTHEROPTION_CONDITIONS_BLOCKING:
+            case MOD_BOOKING_BO_SUBMIT_STATUS_BOOKOTHEROPTION_NOOVERBOOKING:
+            case MOD_BOOKING_BO_SUBMIT_STATUS_BOOKOTHEROPTION_FORCE:
                 $waitinglist = MOD_BOOKING_STATUSPARAM_BOOKED;
+                break;
         }
 
         // Only if maxperuser is set, the part after the OR is executed.
@@ -1134,19 +1286,64 @@ class booking_option {
         }
 
         $bookinganswers = singleton_service::get_instance_of_booking_answers($this->settings);
+        $answersusers = $bookinganswers->get_users();
+
+        $currentanswerid = null;
+        $timecreated = null;
 
         // Handling of waitinglist.
-        if (isset($bookinganswers->users[$user->id]) && ($currentanswer = $bookinganswers->users[$user->id])) {
+        if (isset($answersusers[$user->id]) && ($currentanswer = $answersusers[$user->id])) {
+            $currentanswerid = $currentanswer->baid;
+            $timecreated = $currentanswer->timecreated;
+
             switch ($currentanswer->waitinglist) {
                 case MOD_BOOKING_STATUSPARAM_DELETED:
                     break;
                 case MOD_BOOKING_STATUSPARAM_BOOKED:
+                    // Check if multiple bookings are enabled.
+                    $ismultipbookingsoptionenable = self::get_value_of_json_by_key($this->id, 'multiplebookings');
                     // If we come from sync_waiting_list it might be possible that someone is moved from booked to waiting list.
-                    // If we are already booked, we don't do anything.
-                    if ($waitinglist == MOD_BOOKING_STATUSPARAM_BOOKED) {
+                    // If we are already booked and multiple bookings is not enabled, we don't do anything.
+                    if (
+                        $waitinglist == MOD_BOOKING_STATUSPARAM_BOOKED
+                        && (
+                            !$ismultipbookingsoptionenable
+                            || $currentanswer->timemodified == $timebooked
+                        )
+                    ) {
                         return true;
                     }
                     // Else, we might move from booked to waitinglist, we just continue.
+
+                    if ($ismultipbookingsoptionenable) {
+                        // When the multiple booking option is enabled, we need to check if the user
+                        // is trying to book the option after the configured period of time.
+                        // If the configured time has not passed, we don’t allow the user to book an option again.
+                        $allowtobookagainafter = self::get_value_of_json_by_key($this->id, 'allowtobookagainafter');
+                        if ($currentanswer->timebooked + $allowtobookagainafter > time()) {
+                            return true;
+                        }
+
+                        // When the multiple booking option is enabled, we need to update the waitinglist column value
+                        // of previously booked records from MOD_BOOKING_STATUSPARAM_BOOKED
+                        // to MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED, and then insert a new record.
+                        $comparingtime = empty($timebooked) ? time() : $timebooked;
+                        if ($currentanswer->timebooked < $comparingtime) {
+                            $timecreated = $comparingtime;
+                            self::change_booking_answer_waitinglist_status(
+                                MOD_BOOKING_STATUSPARAM_BOOKED,
+                                MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED,
+                                $user->id,
+                                $this->optionid
+                            );
+                        } else {
+                            $waitinglist = MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED;
+                        }
+
+                        // If user is rebooking the option, we need to insert a new record.
+                        // So to prevent any record update in booking_answerts table, we need to set record id to null.
+                        $currentanswerid = null;
+                    }
                     break;
                 case MOD_BOOKING_STATUSPARAM_RESERVED:
                     // If the old and the new value is reserved, we just return true, we don't need to do anything.
@@ -1163,21 +1360,31 @@ class booking_option {
                     }
                     break;
             }
-            $currentanswerid = $currentanswer->baid;
-            $timecreated = $currentanswer->timecreated;
-        } else {
-            $currentanswerid = null;
-            $timecreated = null;
+        }
 
-            // Should users who want to book be parked in the waitinglist waiting for confirmation.
-            if (
-                ($waitinglist === MOD_BOOKING_STATUSPARAM_BOOKED)
-                && ($status != MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL && !empty($this->settings->waitforconfirmation))
-                || (($status === MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL)
-                && enrollink::enrolmentstatus_waitinglist($this->settings))
-            ) {
-                $waitinglist = MOD_BOOKING_STATUSPARAM_WAITINGLIST;
+        if (!empty($timebooked)) {
+            $timecreated = $timebooked;
+        }
 
+        // Should users who want to book be parked in the waitinglist waiting for confirmation.
+        if (
+            $waitinglist === MOD_BOOKING_STATUSPARAM_BOOKED
+            && (
+                $status != MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL
+                && ($this->settings->waitforconfirmation == 1
+                || ($this->settings->waitforconfirmation == 2 && !empty($bookinganswers->get_usersonwaitinglist())))
+            )
+            || (
+                ($status === MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL)
+                && enrollink::enrolmentstatus_waitinglist($this->settings)
+            )
+        ) {
+            $waitinglist = MOD_BOOKING_STATUSPARAM_WAITINGLIST;
+
+            // When admin confirms a user user in waiting list, this condition will be met.
+            if (!is_null($currentanswerid)) {
+                $waitinglist = MOD_BOOKING_STATUSPARAM_BOOKED;
+            } else {
                 $event = bookinganswer_waitingforconfirmation::create([
                     'objectid' => $this->optionid,
                     'context' => context_module::instance($this->cmid),
@@ -1188,6 +1395,14 @@ class booking_option {
             }
         }
 
+        // Use the waitinglist as status for booking history.
+        if (
+            $status === MOD_BOOKING_BO_SUBMIT_STATUS_BOOKOTHEROPTION_CONDITIONS_BLOCKING
+            || $status === MOD_BOOKING_BO_SUBMIT_STATUS_BOOKOTHEROPTION_FORCE
+            || $status === MOD_BOOKING_BO_SUBMIT_STATUS_BOOKOTHEROPTION_NOOVERBOOKING
+        ) {
+            $historystatus = MOD_BOOKING_STATUSPARAM_BOOKOTHEROPTIONS;
+        }
         $baid = self::write_user_answer_to_db(
             $this->booking->id,
             $frombookingid,
@@ -1197,7 +1412,8 @@ class booking_option {
             $currentanswerid,
             $timecreated,
             $status,
-            $erlid
+            $erlid,
+            $historystatus ?? 0
         );
 
         if (
@@ -1235,7 +1451,7 @@ class booking_option {
 
         // To avoid a problem with the payment process, we catch any error that might occur.
         try {
-            $this->after_successful_booking_routine($user, $waitinglist);
+            $this->after_successful_booking_routine($user, $waitinglist, $timebooked);
             return true;
         } catch (Exception $e) {
             // We do not want this to fail if there was an exception.
@@ -1266,10 +1482,11 @@ class booking_option {
      * @param int $userid
      * @param int $optionid
      * @param int $waitinglist
-     * @param [type] $currentanswerid
-     * @param [type] $timecreated
+     * @param ?int $currentanswerid
+     * @param ?int $timecreated
      * @param int $confirmwaitinglist
      * @param string $erlid
+     * @param int $historystatus
      * @return int
      */
     public static function write_user_answer_to_db(
@@ -1278,14 +1495,14 @@ class booking_option {
         int $userid,
         int $optionid,
         int $waitinglist,
-        $currentanswerid = null,
-        $timecreated = null,
-        $confirmwaitinglist = 0,
-        $erlid = ""
+        ?int $currentanswerid = null,
+        ?int $timecreated = null,
+        int $confirmwaitinglist = 0,
+        string $erlid = "",
+        int $historystatus = 0
     ) {
 
         global $DB, $USER;
-
         $now = time();
 
         // For book with credits, we need to delete the cache.
@@ -1299,6 +1516,23 @@ class booking_option {
         $newanswer->timemodified = $now;
         $newanswer->timecreated = $timecreated ?? $now;
         $newanswer->waitinglist = $waitinglist;
+        $newanswer->pricecategory = singleton_service::get_pricecategory_for_user($USER) ?? '';
+
+        // Store the real booking time in the bookinganswers table.
+        // The real booking time is the moment when the user's booking process is finished.
+        // To determine this moment, we can check the value of the waitinglist column
+        // when it is set to MOD_BOOKING_STATUSPARAM_BOOKED.
+        if (
+            in_array(
+                $waitinglist,
+                [
+                    MOD_BOOKING_STATUSPARAM_BOOKED,
+                    MOD_BOOKING_STATUSPARAM_PREVIOUSLYBOOKED,
+                ]
+            )
+        ) {
+            $newanswer->timebooked = $timecreated ?? $now;
+        }
 
         // When a user submits a userform, we need to save this as well.
         customform::add_json_to_booking_answer($newanswer, $userid);
@@ -1313,16 +1547,72 @@ class booking_option {
             self::add_data_to_json($newanswer, 'selflearningendofsubscription', $end);
         }
 
+        $answer = null; // Exisitng answer.
+        $ba = singleton_service::get_instance_of_booking_answers($settings);
+        $users = $ba->get_usersonwaitinglist();
+        if ($answer = $users[$userid] ?? false) {
+            // Prepare value for the key (confirmationcount).
+            $count = self::get_data_from_json($answer, 'confirmationcount');
+            if (!empty($count) && is_numeric($count)) {
+                $confirmationcount = $count;
+                $confirmationcount++; // Increase confirmation count.
+            } else {
+                $confirmationcount = 1;
+            }
+
+            // Prepare value for the key (confirmwaitinglist_modifieduserid).
+            $muid = self::get_data_from_json($answer, 'confirmwaitinglist_modifieduserid');
+            if (is_array($muid)) { // If it is an array, we just add new suer to it.
+                $modifieduserid = $muid;
+                $modifieduserid[] = $USER->id;
+            } else if (is_numeric($muid)) { // If it is a number we chnaged it to array of number and then we add new value.
+                $modifieduserid = [(int) $muid];
+                $modifieduserid[] = $USER->id;
+            } else {
+                $modifieduserid = [];
+                $modifieduserid[] = $USER->id;
+            }
+
+            // Prepare value for the key (confirmwaitinglist_timemodified).
+            $tm = self::get_data_from_json($answer, 'confirmwaitinglist_timemodified');
+            if (is_array($tm)) { // If it is an array, we just add new time to it.
+                $timemodified = $tm;
+                $timemodified[] = time();
+            } else if (is_numeric($tm)) { // If it is a number we chnaged it to array of number and then we add new value.
+                $timemodified = [(int) $tm];
+                $timemodified[] = time();
+            } else {
+                $timemodified = [];
+                $timemodified[] = time();
+            }
+        } else {
+            $confirmationcount = 1;
+            $modifieduserid[] = $USER->id;
+            $timemodified[] = time();
+        }
+
         // The confirmation on the waitinglist is saved here.
-        if ($confirmwaitinglist === 2) {
+        if (
+            $confirmwaitinglist === MOD_BOOKING_BO_SUBMIT_STATUS_CONFIRMATION
+            ||
+            (
+                !empty($answer)
+                && $answer->waitinglist == MOD_BOOKING_STATUSPARAM_WAITINGLIST // Ensures we save keys on next confirmations.
+                && $confirmwaitinglist == MOD_BOOKING_STATUSPARAM_BOOKED
+                && $settings->waitforconfirmation > 0 // Ensures we dont save the keys when option has no confirmation
+                // in the case an answer will be directly moves to booked from waiting list when a new free place is available.
+            )
+        ) {
             self::add_data_to_json($newanswer, 'confirmwaitinglist', 1);
-            self::add_data_to_json($newanswer, 'confirmwaitinglist_modifieduserid', $USER->id);
-            self::add_data_to_json($newanswer, 'confirmwaitinglist_timemodified', time());
-        } else if ($confirmwaitinglist === 3) {
+            self::add_data_to_json($newanswer, 'confirmwaitinglist_modifieduserid', $modifieduserid);
+            self::add_data_to_json($newanswer, 'confirmwaitinglist_timemodified', $timemodified);
+            self::add_data_to_json($newanswer, 'confirmationcount', $confirmationcount);
+        } else if ($confirmwaitinglist === MOD_BOOKING_BO_SUBMIT_STATUS_UN_CONFIRM) {
             // We only remove the key if we are still on waitinglist.
             self::remove_key_from_json($newanswer, 'confirmwaitinglist');
             self::remove_key_from_json($newanswer, 'confirmwaitinglist_modifieduserid');
             self::remove_key_from_json($newanswer, 'confirmwaitinglist_timemodified');
+            self::remove_key_from_json($newanswer, 'confirmationcount');
         }
         if (!empty($erlid)) {
             self::add_data_to_json($newanswer, 'erlid', $erlid);
@@ -1334,10 +1624,30 @@ class booking_option {
                 new \moodle_exception("dmlwriteexception");
             }
         } else {
+            // When we insert a record, we want timemodified to be the same as time created.
+            // This is necessary if we import old bookings.
+            // It should not ever else play any role.
+            $newanswer->timemodified = $newanswer->timecreated;
+
             if (!$newanswer->id = $DB->insert_record('booking_answers', $newanswer)) {
                 new \moodle_exception("dmlwriteexception");
             }
         }
+
+        $status = empty($historystatus) ? $newanswer->waitinglist : $historystatus;
+        $addtionalinfos = [];
+        // We log pricecategory also in the history as it may be changed when answer is updated.
+        if (!empty($newanswer->pricecategory)) {
+            $addtionalinfos['pricecategory'] = $newanswer->pricecategory;
+        }
+        self::booking_history_insert(
+            $status,
+            $newanswer->id,
+            $newanswer->optionid,
+            $newanswer->bookingid,
+            $userid,
+            $addtionalinfos
+        );
 
         // After writing an answer, cache has to be invalidated.
         self::purge_cache_for_answers($optionid);
@@ -1359,7 +1669,7 @@ class booking_option {
 
         // We have to get all the records of the user, there might be more than one.
         $currentanswers = null;
-        foreach ($ba->answers as $answer) {
+        foreach ($ba->get_answers() as $answer) {
             if (
                 $answer->optionid == $this->settings->id
                     && $answer->userid == $user->id
@@ -1433,9 +1743,10 @@ class booking_option {
      *
      * @param stdClass $user
      * @param int $waitinglist
+     * @param int $timebooked
      * @return bool
      */
-    public function after_successful_booking_routine(stdClass $user, int $waitinglist) {
+    public function after_successful_booking_routine(stdClass $user, int $waitinglist, int $timebooked = 0) {
 
         global $DB, $USER;
 
@@ -1450,23 +1761,41 @@ class booking_option {
 
         // At this point, we trigger the after booking actions.
         // Depending on the status, we have different ways of continueing.
-        if (actions_info::apply_actions($this->settings) == 1) {
+        if (actions_info::apply_actions($this->settings, $user->id) == 1) {
             return true;
         }
 
         $other = [];
         $ba = singleton_service::get_instance_of_booking_answers($this->settings);
 
-        if (isset($ba->usersonlist[$user->id])) {
-            $answer = $ba->usersonlist[$user->id];
-            $other['baid'] = $answer->baid;
+        if (empty($timebooked)) {
+            $usersonlist = $ba->get_usersonlist();
+            if (isset($usersonlist[$user->id])) {
+                $answer = $usersonlist[$user->id];
+            }
+        } else {
+            $answer = $DB->get_record(
+                'booking_answers',
+                [
+                    'timebooked' => $timebooked,
+                    'userid' => $user->id,
+                    'optionid' => $this->optionid,
+                ]
+            );
+            $answer->baid = $answer->id;
+        }
+
+        if (!empty($answer)) {
+            $other['baid'] = $answer->baid ?? 0;
             $other['json'] = $answer->json ?? '';
         }
+
+        $answers = $ba->get_answers();
 
         if (
             !empty($ba)
             && !empty($answer->baid)
-            && isset($ba->answers[$answer->baid])
+            && isset($answers[$answer->baid])
             && enrollink::enroluseraction_allows_enrolment($ba, $answer->baid)
         ) {
             $this->enrol_user_coursestart($user->id);
@@ -1617,11 +1946,36 @@ class booking_option {
         }
 
         $bookingsettings = singleton_service::get_instance_of_booking_settings_by_bookingid($this->bookingid);
+
         if (!$manual) {
-            if (!$bookingsettings->autoenrol) {
+            if (
+                !$bookingsettings->autoenrol
+                && !$bookingsettings->addtogroupofcurrentcourse
+            ) {
                 return; // Autoenrol not enabled.
             }
         }
+        // First check if enrolment to group of current course if active.
+        if (
+            isset($bookingsettings->addtogroupofcurrentcourse)
+            && !empty($bookingsettings->addtogroupofcurrentcourse)
+        ) {
+            // Global COURSE is not a reliable source here, so we fetch the courseid via the booking.
+            $booking = singleton_service::get_instance_of_booking_by_cmid($bookingsettings->cmid);
+            $coursegroups = groups_get_all_groups($booking->course->id);
+            foreach ($bookingsettings->addtogroupofcurrentcourse as $groupid) {
+                if ($groupid == MOD_BOOKING_ENROL_INTO_GROUP_OF_BOOKINGOPTION) {
+                    $newoptionstd = $this->settings->return_settings_as_stdclass();
+                    if ($gid = $this->create_group($newoptionstd, false, $booking->course->id)) {
+                        groups_add_member($gid, $userid);
+                    }
+                    // Check for group of current bookingoption.
+                } else if (isset($coursegroups[$groupid])) {
+                    groups_add_member($groupid, $userid);
+                }
+            }
+        }
+
         $courseid = empty($courseid) ? $this->option->courseid : $courseid;
         if (empty($courseid)) {
             return; // No course specified.
@@ -1656,7 +2010,14 @@ class booking_option {
             // ...until the duration of the self-learning course has passed #684.
             // Use booking_check_if_teacher here instead of $isteacher to make this independent of the function call.
             if (!empty($this->settings->selflearningcourse) && !$isteacher) {
-                $now = time();
+                // The inscription time is always from the time the user was actually booked.
+                if ($ba = $bookinganswers->user_get_last_active_booking($userid)) {
+                    // Timecreated is not a perfect solution, because users could have been on the waitinglist.
+                    $now = $ba->timecreated;
+                } else {
+                    $now = time();
+                }
+
                 $duration = $this->settings->duration ?? 0;
                 $end = empty($duration) ? 0 : $now + $duration;
                 // Enrol using the default role from now until now + duration.
@@ -1688,13 +2049,12 @@ class booking_option {
                 }
             }
 
-            // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
-            // TODO: Track enrolment status in booking_answers. It makes no sense to track it in booking_options.
+            // Enrol into group of related (linked) Course.
             if ($bookingsettings->addtogroup == 1) {
                 $groups = groups_get_all_groups($courseid);
                 if (
                     !is_null($this->option->groupid) && ($this->option->groupid > 0)
-                    && in_array($this->option->groupid, $groups)
+                    && in_array($this->option->groupid, array_keys($groups))
                 ) {
                     groups_add_member($this->option->groupid, $userid);
                 } else {
@@ -1718,6 +2078,8 @@ class booking_option {
      */
     public function unenrol_user($userid) {
         global $DB;
+        // Trigger given unenrolactions.
+        $this->sourcecoursegroup_unenrol_actions($userid);
 
         $bookingsettings = singleton_service::get_instance_of_booking_settings_by_bookingid($this->bookingid);
 
@@ -1762,34 +2124,47 @@ class booking_option {
      * Create a new group for a booking option if it is not already created
      * Return the id of the group.
      * @param stdClass $newoption
+     * @param bool $groupintarget
+     * @param int $sourcecourseid
      * @return bool|number id of the group
      * @throws \moodle_exception
      */
-    public function create_group($newoption) {
+    public function create_group(stdClass $newoption, bool $groupintarget = true, int $sourcecourseid = 0) {
         global $DB;
 
         $bookingsettings = singleton_service::get_instance_of_booking_settings_by_bookingid($this->bookingid);
         $bookingsettings = $bookingsettings->return_settings_as_stdclass();
-        $newgroupdata = self::generate_group_data($bookingsettings, $newoption);
+        $courseid = $groupintarget ? $newoption->courseid : $sourcecourseid;
 
-        $groupids = array_keys(groups_get_all_groups($newoption->courseid));
+        $newgroupdata = self::generate_group_data($bookingsettings, $newoption, $courseid);
+        $existinggroups = groups_get_all_groups($courseid);
+        $groupids = array_keys($existinggroups);
         // If group name already exists, do not create it a second time, it should be unique.
-        if ($groupid = groups_get_group_by_name($newgroupdata->courseid, $newgroupdata->name)) {
+        if ($groupid = groups_get_group_by_name($courseid, $newgroupdata->name)) {
             return $groupid;
         }
         if (
-            $groupid = groups_get_group_by_name($newgroupdata->courseid, $newgroupdata->name) &&
-                !isset($this->option->id)
+            $groupid = groups_get_group_by_name($courseid, $newgroupdata->name)
+            && !isset($this->option->id)
         ) {
             $url = new moodle_url('/mod/booking/view.php', ['id' => $this->cmid]);
             throw new \moodle_exception('groupexists', 'booking', $url->out());
         }
-        if ($this->option->groupid > 0 && in_array($this->option->groupid, $groupids)) {
+        // Target group ids are stored in groupid column of option.
+        if (
+            $groupintarget
+            && $this->option->groupid > 0
+            && in_array($this->option->groupid, $groupids)
+        ) {
             // Group has been created but renamed.
             $newgroupdata->id = $this->option->groupid;
             groups_update_group($newgroupdata);
             return $this->option->groupid;
-        } else if (($this->option->groupid > 0 && !in_array($this->option->groupid, $groupids)) || $this->option->groupid == 0) {
+        } else if (
+            $groupintarget
+            && (($this->option->groupid > 0 && !in_array($this->option->groupid, $groupids))
+            || $this->option->groupid == 0)
+        ) {
             // Group has been deleted and must be created and groupid updated in DB. Or group does not yet exist.
             $data = new stdClass();
             $data->id = $this->option->id;
@@ -1798,9 +2173,46 @@ class booking_option {
                 $DB->update_record('booking_options', $data);
             }
             return $data->groupid;
+        } else if (
+            !$groupintarget
+        ) {
+            $searchstring = MOD_BOOKING_ENROL_GROUPTYPE_SOURCECOURSE . $this->option->id;
+            foreach ($existinggroups as $exisitinggroup) {
+                // For groups of current course, the linking is in the idnumber of the group data.
+                if ($exisitinggroup->idnumber == $searchstring) {
+                    return $exisitinggroup->id;
+                }
+            }
+            $newgroupdata->idnumber = $searchstring;
+            return groups_create_group($newgroupdata);
+        }
+        return false;
+    }
+
+    /**
+     * Unenrol users from group in source course according to corresponding setting.
+     *
+     * @param int $userid
+     *
+     * @return void
+     *
+     */
+    private function sourcecoursegroup_unenrol_actions(int $userid) {
+        // Check if json is valid.
+        if (empty($this->booking->settings->json)) {
+            return;
         }
 
-        return false;
+        $bsettings = json_decode($this->booking->settings->json);
+        if (empty($bsettings->unenrolfromgroupofcurrentcourse)) {
+            return;
+        }
+
+        $groups = groups_get_all_groups($this->booking->course->id);
+        $groups = array_filter($groups, fn ($g) => $g->idnumber == MOD_BOOKING_ENROL_GROUPTYPE_SOURCECOURSE . $this->option->id);
+        foreach ($groups as $groupid => $group) {
+            groups_remove_member($groupid, $userid);
+        }
     }
 
     /**
@@ -1808,22 +2220,23 @@ class booking_option {
      *
      * @param stdClass $bookingsettings
      * @param stdClass $optionsettings
+     * @param int $courseid
      * @return stdClass
      * @throws \moodle_exception
      */
-    public static function generate_group_data(stdClass $bookingsettings, stdClass $optionsettings): stdClass {
+    public static function generate_group_data(stdClass $bookingsettings, stdClass $optionsettings, int $courseid): stdClass {
         global $DB;
 
         // Replace tags with content. This alters the booking settings so cloning them.
         $newbookingsettings = clone $bookingsettings;
         $newoptionsettings = clone $optionsettings;
 
-        $tags = new booking_tags($newoptionsettings->courseid);
+        $tags = new booking_tags($courseid);
         $newbookingsettings = $tags->booking_replace($newbookingsettings);
         $newoptionsettings = $tags->option_replace($newoptionsettings);
 
         $newgroupdata = new stdClass();
-        $newgroupdata->courseid = $newoptionsettings->courseid;
+        $newgroupdata->courseid = $courseid;
 
         $optionname = $DB->get_field('booking_options', 'text', ['id' => $newoptionsettings->id]);
         // Before setting name, we have to resolve the id Tag.
@@ -1852,6 +2265,13 @@ class booking_option {
         $answers = $this->get_all_users();
         foreach ($answers as $answer) {
             $this->unenrol_user($answer->userid); // Unenrol any users enrolled via this option.
+            $this->booking_history_insert(
+                MOD_BOOKING_STATUSPARAM_DELETED,
+                $answer->baid,
+                $this->optionid,
+                $this->bookingid,
+                $answer->userid
+            );
         }
         if (
             !$DB->delete_records(
@@ -2028,7 +2448,7 @@ class booking_option {
      * @param int $presencestatus
      */
     public function changepresencestatus($allselectedusers, $presencestatus) {
-        global $DB;
+        global $DB, $COURSE;
 
         foreach ($allselectedusers as $ui) {
             $userdata = $DB->get_record_sql(
@@ -2038,7 +2458,91 @@ class booking_option {
                 ['optionid' => $this->optionid, 'userid' => $ui]
             );
 
+            $status = MOD_BOOKING_STATUSPARAM_PRESENCE_CHANGED;
+            $answerid = $userdata->id;
+            $optionid = $userdata->optionid;
+            $bookingid = $userdata->bookingid;
+            $userid = $userdata->userid;
+            $presenceold = $userdata->status;
+            $presencechange = [
+                'presence' => [
+                    'presenceold' => $presenceold,
+                    'presencenew' => $presencestatus,
+                ],
+            ];
+
+            self::booking_history_insert($status, $answerid, $optionid, $bookingid, $userid, $presencechange);
             $userdata->status = $presencestatus;
+
+            // Trigger the presence changed event, so we can react via rules for example.
+            $coursecontext = context_course::instance($COURSE->id);
+            $event = bookinganswer_presencechanged::create([
+                'objectid' => $this->optionid,
+                'contextid' => $coursecontext->id,
+                'relateduserid' => $ui,
+                'other' => [
+                    'presenceold' => $presenceold,
+                    'presencenew' => $presencestatus,
+                ],
+            ]);
+            $event->trigger();
+
+            // At last, we write to DB.
+            $DB->update_record('booking_answers', $userdata);
+        }
+
+        // After updating, cache has to be invalidated.
+        self::purge_cache_for_answers($this->optionid);
+    }
+
+    /**
+     * Change notes for selected users.
+     *
+     * @param array $allselectedusers
+     * @param string $notes
+     */
+    public function edit_notes(array $allselectedusers, string $notes): void {
+        global $DB, $COURSE;
+
+        foreach ($allselectedusers as $ui) {
+            $userdata = $DB->get_record_sql(
+                "SELECT *
+                FROM {booking_answers}
+                WHERE optionid = :optionid AND userid = :userid AND waitinglist < 2",
+                ['optionid' => $this->optionid, 'userid' => $ui]
+            );
+
+            $historystatus = MOD_BOOKING_STATUSPARAM_NOTES_EDITED;
+            $answerid = $userdata->id;
+            $optionid = $userdata->optionid;
+            $bookingid = $userdata->bookingid;
+            $userid = $userdata->userid;
+            $notesold = $userdata->notes;
+            $noteschange = [
+                'notes' => [
+                    'notesold' => $notesold,
+                    'notesnew' => $notes,
+                ],
+            ];
+
+            self::booking_history_insert($historystatus, $answerid, $optionid, $bookingid, $userid, $noteschange);
+            $userdata->notes = $notes;
+
+            // Trigger the notes edited event, so we can react via rules for example.
+            $coursecontext = context_course::instance($COURSE->id);
+            $event = bookinganswer_notesedited::create([
+                'objectid' => $this->optionid,
+                'contextid' => $coursecontext->id,
+                'relateduserid' => $ui,
+                'other' => [
+                    'notesold' => $notesold,
+                    'notesnew' => $notes,
+                ],
+            ]);
+            $event->trigger();
+
+            /* In the future, we might need a notes changed event here
+            (like the presence changed event in function changepresencestatus). */
             $DB->update_record('booking_answers', $userdata);
         }
 
@@ -2071,12 +2575,14 @@ class booking_option {
      *
      * @param int $userid
      * @param bool $allowoverbooking
+     * @param int $confirmstatus
      * @return mixed false if enrolement is not possible, 0 for can book, 1 for waitinglist and 2 for notification list.
      */
-    private function check_if_limit(int $userid, bool $allowoverbooking = false) {
+    public function check_if_limit(int $userid, bool $allowoverbooking = false, int $confirmstatus = 0) {
 
         $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
         $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
+        $answersusers = $bookinganswer->get_users();
 
         // We get the booking information of a specific user.
         $bookingstatus = $bookinganswer->return_all_booking_information($userid);
@@ -2086,10 +2592,25 @@ class booking_option {
         if ($bookingstatus = reset($bookingstatus)) {
             if (
                 isset($bookingstatus['fullybooked'])
-                && !$bookingstatus['fullybooked']
+                && (!$bookingstatus['fullybooked']
+                    && (
+                        (    // Other users already waiting and given user not yet on list.
+                            (empty($bookingstatus['waiting'])
+                            || empty($settings->jsonobject->useprice)
+                            )
+                        ||
+                            isset($answersusers[$userid])
+                        )
+                        || $confirmstatus == MOD_BOOKING_BO_SUBMIT_STATUS_AUTOENROL
+                    )
+                )
             ) {
                 $status = MOD_BOOKING_STATUSPARAM_BOOKED;
-            } else if (isset($bookingstatus['freeonwaitinglist']) && $bookingstatus['freeonwaitinglist'] > 0) {
+            } else if (
+                isset($bookingstatus['freeonwaitinglist'])
+                && ($bookingstatus['freeonwaitinglist'] > 0
+                || $bookingstatus['freeonwaitinglist'] == -1)
+            ) {
                 $status = MOD_BOOKING_STATUSPARAM_WAITINGLIST;
             } else {
                 if ($allowoverbooking) {
@@ -2116,6 +2637,206 @@ class booking_option {
             'optionid = :optionid AND completed = 1',
             ['optionid' => $this->optionid]
         );
+    }
+
+    /**
+     * Interface to update options for a couple of users at a time.
+     *
+     * @param array $userids
+     *
+     * @return bool
+     *
+     */
+    public function toggle_users_completion(array $userids) {
+        foreach ($userids as $userid) {
+            if (!$result = $this->toggle_user_completion($userid)) {
+                return $result;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Function to update the booking_answer record and trigger the completion event.
+     * Also write to history.
+     *
+     * @param int $userid
+     * @param int $timebooked // Pass on a timestamp, if we import old data.
+     *
+     * @return bool
+     *
+     */
+    public function toggle_user_completion(int $userid, int $timebooked = 0) {
+        global $USER, $DB, $USER;
+
+        $cmid = $this->cmid;
+        $optionid = $this->id;
+
+        $settings = $this->settings;
+        $ba = singleton_service::get_instance_of_booking_answers($settings);
+
+        if (empty($timebooked)) {
+            $users = $ba->get_usersonlist();
+            if (!$userdata = $users[$userid] ?? false) {
+                return false;
+            }
+        } else {
+            try {
+                // If we pass on a timebooked, we have to see if the user has an entry for that time.
+                $userdata = $DB->get_record(
+                    'booking_answers',
+                    ['timebooked' => $timebooked, 'userid' => $userid, 'optionid' => $optionid]
+                );
+                if ($userdata) {
+                    $userdata->baid = $userdata->id;
+                    $userdata->id = $userdata->userid;
+                    if (!empty($userdata->completed)) {
+                        return false;
+                    }
+                }
+            } catch (Throwable $e) {
+                throw new moodle_exception(
+                    'errorloadinguserdata',
+                    'booking',
+                    '',
+                    null,
+                    $e->getMessage() . "timebooked: $timebooked, userid: $userid, optionid: $optionid"
+                );
+            }
+        }
+
+        $completionold = $userdata->completed;
+        $userdata->completed = empty($completionold) ? '1' : '0';
+        $userdata->timemodified = empty($timebooked) ? time() : $timebooked;
+
+        $data = [
+            'id' => $userdata->baid,
+            'completed' => $userdata->completed,
+            'timemodified' => empty($timebooked) ? time() : $timebooked,
+        ];
+        $other = [
+            'cmid' => $this->cmid,
+        ];
+
+        // Important: userid is the user who triggered, relateduserid is the affected user who completed.
+        $DB->update_record('booking_answers', $data);
+
+        // After activity completion, we need to purge caches for the option.
+        self::purge_cache_for_answers($optionid);
+
+        // Trigger the completion event, in order to send the notification mail.
+        if (!empty($userdata->completed)) {
+            // Create certificate.
+            if (
+                get_config('booking', 'certificateon')
+                && !get_config('booking', 'presencestatustoissuecertificate')
+                && !empty($userdata->completed)
+            ) {
+                $certid = certificate::issue_certificate($this->id, $userdata->id, $timebooked);
+            }
+
+            if (
+                isset($certid)
+                && !empty($certid)
+            ) {
+                $other['certid'] = $certid;
+            }
+            $event = \mod_booking\event\bookingoption_completed::create(
+                [
+                    'context' => context_module::instance($cmid),
+                    'objectid' => $optionid,
+                    'userid' => $USER->id,
+                    'relateduserid' => $userid,
+                    'other' => $other,
+                ]
+            );
+            $event->trigger();
+        }
+
+        $status = MOD_BOOKING_STATUSPARAM_COMPLETION_CHANGED;
+        $answerid = $userdata->id;
+        $optionid = $userdata->optionid;
+        $bookingid = $userdata->bookingid;
+        $userid = $userdata->userid;
+        $completionchange = [
+            'completion' => [
+                'completionold' => $completionold,
+                'completionnew' => $userdata->completed,
+            ],
+        ];
+        try {
+            self::booking_history_insert($status, $answerid, $optionid, $bookingid, $userid, $completionchange);
+        } catch (Throwable $e) {
+            $message = $e->getMessage();
+            if (get_config('booking', 'bookingdebugmode')) {
+                $event = booking_debug::create([
+                    'objectid' => $optionid,
+                    'context' => context_system::instance(),
+                    'relateduserid' => $USER->id,
+                    'other' => [
+                        'message' => $message,
+                    ],
+                ]);
+                $event->trigger();
+            }
+        }
+
+        if (get_config('booking', 'bookingdebugmode')) {
+            $event = booking_debug::create([
+                'objectid' => $optionid,
+                'context' => context_system::instance(),
+                'relateduserid' => $USER->id,
+                'other' => [
+                    'userdata' => $userdata,
+                    'completed' => $userdata->completed,
+                    'userid' => $userid,
+                    'optionid' => $optionid,
+                ],
+            ]);
+            $event->trigger();
+        }
+
+        if (
+            get_config('booking', 'usecompetencies')
+            && !empty($userdata->completed)
+        ) {
+            try {
+                $context = context_module::instance($settings->cmid);
+                if (!has_capability('moodle/competency:competencygrade', $context)) {
+                    $task = new assign_competency();
+                    // We need to execute the task as admin user.
+                    $task->set_userid(get_admin()->id);
+                    $task->set_custom_data([
+                        'cmid' => $cmid,
+                        'optionid' => $optionid,
+                        'userid' => $userid,
+                    ]);
+                    manager::queue_adhoc_task($task);
+                } else {
+                    // Call your static function in mod_booking.
+                    competencies::assign_competencies(
+                        $settings->cmid,
+                        $optionid,
+                        $userid
+                    );
+                }
+            } catch (Throwable $e) {
+                $message = $e->getMessage();
+                if (get_config('booking', 'bookingdebugmode')) {
+                    $event = booking_debug::create([
+                        'objectid' => $optionid,
+                        'context' => context_system::instance(),
+                        'relateduserid' => $USER->id,
+                        'other' => [
+                            'message' => $message,
+                        ],
+                    ]);
+                    $event->trigger();
+                }
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -2213,8 +2934,9 @@ class booking_option {
         $suser = null;
 
         $bookinganswers = singleton_service::get_instance_of_booking_answers($this->settings);
+        $usersonlist = $bookinganswers->get_usersonlist();
 
-        foreach ($bookinganswers->usersonlist as $key => $value) {
+        foreach ($usersonlist as $key => $value) {
             if ($value->userid == $userid) {
                 $suser = $key;
                 break;
@@ -2225,7 +2947,7 @@ class booking_option {
             return;
         }
 
-        if ($bookinganswers->usersonlist[$suser]->completed == 0) {
+        if ($usersonlist[$suser]->completed == 0) {
             $userdata = $DB->get_record(
                 'booking_answers',
                 ['optionid' => $this->optionid, 'userid' => $userid, 'waitinglist' => MOD_BOOKING_STATUSPARAM_BOOKED]
@@ -2300,177 +3022,6 @@ class booking_option {
             self::update($newoption, $context);
             $firstrun = false;
         }
-    }
-
-    /**
-     * Print custom report.
-     *
-     * @return void
-     *
-     */
-    public function printcustomreport() {
-        global $CFG;
-
-        include_once($CFG->dirroot . '/mod/booking/TinyButStrong/tbs_class.php');
-        include_once($CFG->dirroot . '/mod/booking/OpenTBS/tbs_plugin_opentbs.php');
-
-        $tbs = new \clsTinyButStrong();
-        $tbs->Plugin(TBS_INSTALL, OPENTBS_PLUGIN);
-        $tbs->NoErr = true;
-
-        [$course, $cm] = get_course_and_cm_from_cmid($this->cmid);
-        $context = \context_module::instance($this->cmid);
-        $coursecontext = \context_course::instance($course->id);
-        $bookingsettings = singleton_service::get_instance_of_booking_settings_by_bookingid($this->bookingid);
-
-        $booking = [
-            'name' => $bookingsettings->name,
-            'eventtype' => $bookingsettings->eventtype,
-            'duration' => $bookingsettings->duration,
-            'organizatorname' => $bookingsettings->organizatorname,
-            'pollurl' => $bookingsettings->pollurl,
-            'pollurlteachers' => $bookingsettings->pollurlteachers,
-        ];
-        $bu = new booking_utils();
-        $option = [
-            'name' => $this->option->text,
-            'location' => $this->option->location,
-            'institution' => $this->option->institution,
-            'address' => $this->option->address,
-            'maxanswers' => $this->option->maxanswers,
-            'maxoverbooking' => $this->option->maxoverbooking ?? 0,
-            'minanswers' => $this->option->minanswers,
-            'bookingopeningtime' => ($this->option->bookingopeningtime == 0 ? get_string('datenotset', 'mod_booking') : userdate(
-                $this->option->bookingopeningtime,
-                get_string('strftimedatetime', 'langconfig')
-            )),
-            'bookingclosingtime' => ($this->option->bookingclosingtime == 0 ? get_string('datenotset', 'mod_booking') : userdate(
-                $this->option->bookingclosingtime,
-                get_string('strftimedatetime', 'langconfig')
-            )),
-            'duration' => $bu->get_pretty_duration($this->option->duration),
-            'coursestarttime' => ($this->option->coursestarttime == 0 ? get_string('datenotset', 'mod_booking') : userdate(
-                $this->option->coursestarttime,
-                get_string('strftimedatetime', 'langconfig')
-            )),
-            'courseendtime' => ($this->option->courseendtime == 0 ? get_string('datenotset', 'mod_booking') : userdate(
-                $this->option->courseendtime,
-                get_string('strftimedatetime', 'langconfig')
-            )),
-            'pollurl' => $this->option->pollurl,
-            'pollurlteachers' => $this->option->pollurlteachers,
-        ];
-
-        $allusers = $this->get_all_users();
-        $allteachers = $this->get_teachers();
-
-        $users = [];
-        foreach ($allusers as $key => $value) {
-            $users[] = [
-                'id' => $value->userid,
-                'firstname' => $value->firstname,
-                'lastname' => $value->lastname,
-                'email' => $value->email,
-                'institution' => $value->institution,
-            ];
-        }
-
-        $teachers = [];
-        foreach ($allteachers as $key => $value) {
-            $teachers[] = [
-                'id' => $value->userid,
-                'firstname' => $value->firstname,
-                'lastname' => $value->lastname,
-                'email' => $value->email,
-                'institution' => $value->institution,
-            ];
-        }
-
-        $fs = get_file_storage();
-
-        $files = $fs->get_area_files(
-            $coursecontext->id,
-            'mod_booking',
-            'templatefile',
-            $bookingsettings->customtemplateid,
-            'sortorder,filepath,filename',
-            false
-        );
-
-        if ($files) {
-            $file = reset($files);
-
-            // Get file.
-            $file = $fs->get_file(
-                $coursecontext->id,
-                'mod_booking',
-                'templatefile',
-                $bookingsettings->customtemplateid,
-                $file->get_filepath(),
-                $file->get_filename()
-            );
-        }
-
-        $ext = pathinfo($file->get_filename(), PATHINFO_EXTENSION);
-        $filename = uniqid(rand(), false);
-
-        $tempfile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $filename . ".{$ext}";
-
-        $handle = fopen($tempfile, "w");
-        fwrite($handle, $file->get_content());
-        fclose($handle);
-
-        $tbs->LoadTemplate($tempfile, OPENTBS_ALREADY_UTF8);
-
-        $tbs->PlugIn(OPENTBS_SELECT_MAIN);
-        $tbs->MergeField('booking', $booking);
-        $tbs->MergeField('option', $option);
-        $tbs->MergeBlock('users', $users);
-        $tbs->MergeBlock('teachers', $teachers);
-
-        $tbs->LoadTemplate('#styles.xml');
-        $tbs->MergeField('booking', $booking);
-        $tbs->MergeField('option', $option);
-        $tbs->MergeBlock('users', $users);
-        $tbs->MergeBlock('teachers', $teachers);
-
-        $tbs->Show(OPENTBS_STRING);
-        $tempfilefull = $tbs->Source;
-
-        $fullfile = [
-            'contextid' => $coursecontext->id, // ID of context.
-            'component' => 'mod_booking', // Usually = table name.
-            'filearea' => 'templatefile', // Usually = table name.
-            'itemid' => 0, // Usually = ID of row in table.
-            'filepath' => '/', // Any path beginning and ending in '/'.
-            'filename' => "{$filename}.{$ext}", // Any filename.
-        ];
-
-        // Create file containing text 'hello world'.
-        $newfile = $fs->create_file_from_string($fullfile, $tbs->Source);
-
-        header('Content-Description: File Transfer');
-        header('Content-Type: application/octet-stream');
-        header('Expires: 0');
-        header('Cache-Control: must-revalidate');
-        header('Pragma: public');
-
-        $converter = new \core_files\converter();
-        $conversion = $converter->start_conversion($newfile, 'pdf', true);
-
-        if ($conversion->get_destfile() !== false) {
-            header('Content-Disposition: attachment; filename="' . $conversion->get_destfile()->get_filename() . '.pdf"');
-            echo $conversion->get_destfile()->get_content();
-            $conversion->get_destfile()->delete();
-        } else {
-            header('Content-Disposition: attachment; filename="' . $newfile->get_filename() . '"');
-            echo $newfile->get_content();
-        }
-
-        unlink($tempfile);
-        $newfile->delete();
-
-        exit();
     }
 
     /**
@@ -2611,8 +3162,9 @@ class booking_option {
             // Also make sure that teacher reminders won't be send to booked users.
             $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
             $answers = singleton_service::get_instance_of_booking_answers($settings);
-            if (!empty($answers->usersonlist) && $messageparam !== MOD_BOOKING_MSGPARAM_REMINDER_TEACHER) {
-                foreach ($answers->usersonlist as $currentuser) {
+            $usersonlist = $answers->get_usersonlist();
+            if (!empty($usersonlist) && $messageparam !== MOD_BOOKING_MSGPARAM_REMINDER_TEACHER) {
+                foreach ($usersonlist as $currentuser) {
                     $tmpuser = new stdClass();
                     $tmpuser->id = $currentuser->userid;
                     $allusers[] = $tmpuser;
@@ -2707,6 +3259,10 @@ class booking_option {
      * @param bool $withcustomfields
      * @param bool $forbookeduser
      * @param bool $ashtml
+     * @param bool $removeonlinesessionlinks If this is true, then online session links
+     * (like teams, zoom etc.) will be removed from the return array. This is necessary
+     * when we use it in cached col_functions as the caching would destroy the logic of
+     * the links anyway.
      *
      * @return array
      * @throws \dml_exception
@@ -2716,8 +3272,9 @@ class booking_option {
         $descriptionparam = 0,
         $withcustomfields = false,
         $forbookeduser = false,
-        $ashtml = false
-    ) {
+        $ashtml = false,
+        $removeonlinesessionlinks = false
+    ): array {
 
         // If we didn't set a $bookingevent (record from booking_optiondates) we retrieve all of them for this option.
         // Else, we check if there are sessions.
@@ -2747,7 +3304,8 @@ class booking_option {
                     $this->settings->sessioncustomfields,
                     $date->id,
                     $descriptionparam,
-                    $forbookeduser
+                    $forbookeduser,
+                    $removeonlinesessionlinks
                 );
             }
 
@@ -2770,6 +3328,8 @@ class booking_option {
                         $entityfullname,
                         ['target' => '_blank']
                     );
+                } else {
+                    $returnsession['entitylink'] = null;
                 }
             }
 
@@ -2790,13 +3350,18 @@ class booking_option {
      * @param int $sessionid
      * @param int $descriptionparam
      * @param bool $forbookeduser
+     * @param bool $removeonlinesessionlinks If this is true, then online session links
+     *      (like teams, zoom etc.) will be removed from the return array. This is necessary
+     *      when we use it in cached col_functions as the caching would destroy the logic of
+     *      the links anyway.
      * @return array
      */
     public static function return_array_of_customfields(
         $fields,
         $sessionid = 0,
         $descriptionparam = 0,
-        $forbookeduser = false
+        $forbookeduser = false,
+        $removeonlinesessionlinks = false
     ) {
 
         $returnarray = [];
@@ -2811,7 +3376,8 @@ class booking_option {
                     $field,
                     $sessionid,
                     $descriptionparam,
-                    $forbookeduser
+                    $forbookeduser,
+                    $removeonlinesessionlinks
                 )
             ) {
                 $returnarray[] = $value;
@@ -2827,17 +3393,23 @@ class booking_option {
      * @param int $sessionid
      * @param int $descriptionparam
      * @param bool $forbookeduser
+     * @param bool $removeonlinesessionlinks
      */
     public function render_customfield_data(
         $field,
         $sessionid = 0,
         $descriptionparam = 0,
-        $forbookeduser = false
+        $forbookeduser = false,
+        $removeonlinesessionlinks = false
     ) {
 
         // At first, we handle special meeting fields.
         // The regex will match ZoomMeeting, BigBlueButton-Meeting, Teams meeting etc.
         if (preg_match('/^((zoom)|(big.*blue.*button)|(teams)).*meeting$/i', $field->cfgname)) {
+            if ($removeonlinesessionlinks) {
+                // If they are turned off, we return null.
+                return null;
+            }
             // If the session is not yet about to begin, we show placeholder.
             return $this->render_meeting_fields($sessionid, $field, $descriptionparam, $forbookeduser);
         }
@@ -2886,23 +3458,21 @@ class booking_option {
                         'name' => null,
                         'value' => get_string('onlineoptiondate', 'mod_booking'),
                     ];
-                } else {
-                    // We are booked on the web site, we check if we show the real link.
-                    if (!$this->show_conference_link($sessionid)) {
-                        // User is booked, if the user is booked, but event not yet open, we show placeholder with time to start.
-                        return [
-                            'name' => null,
-                            'value' => get_string('linknotavailableyet', 'mod_booking'),
-                        ];
-                    }
-                    // User is booked and event open, we return the button with the link to access, this is for the website.
+                }
+                // We are booked on the web site, we check if we show the real link.
+                if (!$this->show_conference_link($sessionid)) {
+                    // User is booked, if the user is booked, but event not yet open, we show placeholder with time to start.
                     return [
                         'name' => null,
-                        'value' => "<a href=$field->value class='btn btn-secondary booking-meetinglink-btn'>"
-                            . $field->cfgname . "</a>",
+                        'value' => get_string('linknotavailableyet', 'mod_booking'),
                     ];
-                };
-                break;
+                }
+                // User is booked and event open, we return the button with the link to access, this is for the website.
+                return [
+                    'name' => null,
+                    'value' => "<a href=$field->value class='btn btn-secondary booking-meetinglink-btn'>"
+                        . $field->cfgname . "</a>",
+                ];
             case MOD_BOOKING_DESCRIPTION_CALENDAR:
                 // Calendar is static, so we don't have to check for booked or not.
                 // In all cases, we return the Teams-Button, going by the link.php.
@@ -3066,6 +3636,14 @@ class booking_option {
                 );
                 $status = 1;
             } else {
+                // Should we fetch the answerid before the deletion?
+                self::booking_history_insert(
+                    MOD_BOOKING_STATUSPARAM_DELETED,
+                    0,
+                    $optionid,
+                    $booking->id,
+                    $userid
+                );
                 // As the deletion here has no further consequences, we can do it directly in DB.
                 $DB->delete_records(
                     'booking_answers',
@@ -3074,7 +3652,6 @@ class booking_option {
                                     'waitinglist' => MOD_BOOKING_STATUSPARAM_NOTIFYMELIST,
                     ]
                 );
-
                 // Do not forget to purge cache afterwards.
                 self::purge_cache_for_answers($optionid);
 
@@ -3096,9 +3673,15 @@ class booking_option {
      * @param int $optionid
      * @param string $cancelreason
      * @param bool $undo
+     * @param array $userstocancel
      * @return void
      */
-    public static function cancelbookingoption(int $optionid, string $cancelreason = '', bool $undo = false) {
+    public static function cancelbookingoption(
+        int $optionid,
+        string $cancelreason = '',
+        bool $undo = false,
+        array $userstocancel = []
+    ) {
 
         global $DB, $USER;
 
@@ -3136,6 +3719,9 @@ class booking_option {
                                                                         'context' => $context,
                                                                         'objectid' => $optionid,
                                                                         'userid' => $USER->id,
+                                                                        'other' => [
+                                                                            'userstotreat' => $userstocancel ?? [],
+                                                                            ],
                                                                         ]);
             $event->trigger();
             // Deletion of booking answers and user events needs to happen in event observer.
@@ -3236,7 +3822,8 @@ class booking_option {
                 // Show collapsible progressbar.
                 $html .=
                     "<p class='mb-0 mt-1'>
-                        $icon <a data-toggle='collapse' href='#progressbarContainer$optionid' role='button'
+                        $icon <a data-toggle='collapse' data-bs-toggle='collapse'
+                        href='#progressbarContainer$optionid' role='button'
                         aria-expanded='false' aria-controls='progressbarContainer$optionid'>$alreadypassed: $consumedpercentage%</a>
                     </p>
                     <div class='collapse' id='progressbarContainer$optionid'>
@@ -3267,6 +3854,9 @@ class booking_option {
         // We also need to destroy outdated singletons.
         singleton_service::destroy_booking_option_singleton($optionid);
 
+        // At the end, we re-write into singleton.
+        singleton_service::get_instance_of_booking_option_settings($optionid);
+
         // We also purge the answers cache.
         self::purge_cache_for_answers($optionid);
     }
@@ -3288,6 +3878,10 @@ class booking_option {
 
         // We also need to destroy the booked_user_information.
         cache_helper::purge_by_event('setbackmyoptionstable');
+
+        // At the end, we re-write into singleton.
+        $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+        singleton_service::get_instance_of_booking_answers($settings);
     }
 
     /**
@@ -3303,8 +3897,12 @@ class booking_option {
      */
     public static function return_cancel_until_date($optionid) {
 
-        $optionsettings = singleton_service::get_instance_of_booking_option_settings($optionid);
-        $bookingsettings = singleton_service::get_instance_of_booking_settings_by_cmid($optionsettings->cmid);
+        try {
+            $optionsettings = singleton_service::get_instance_of_booking_option_settings($optionid);
+            $bookingsettings = singleton_service::get_instance_of_booking_settings_by_cmid($optionsettings->cmid);
+        } catch (Throwable $e) {
+            return 0;
+        }
 
         // If the option itself has a canceluntil date, we always use this one.
         if (!empty($optionsettings->canceluntil)) {
@@ -3393,7 +3991,7 @@ class booking_option {
      * @param int $userid if not provided, use logged-in $USER->id
      * @return bool true if overbooking is allowed
      */
-    public static function option_allows_overbooking_for_user(int $optionid, int $userid = 0): bool {
+    public static function option_allows_booking_for_user(int $optionid, int $userid = 0): bool {
 
         if (empty($userid)) {
             global $USER;
@@ -3520,17 +4118,10 @@ class booking_option {
 
         $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
         $answers = singleton_service::get_instance_of_booking_answers($settings);
-        $bookedusers = $answers->usersonlist;
+        $bookedusers = $answers->get_usersonlist();
 
         // Use the booking option title as subject.
         $subject = str_replace(' ', '%20', $settings->get_title_with_prefix());
-
-        // As neither comma nor semicolon works on all machines, we need to distinghish here.
-        $useragent = $_SERVER['HTTP_USER_AGENT'];
-        $ismacuser = stripos($useragent, 'Macintosh') !== false ||
-                    stripos($useragent, 'iPhone') !== false ||
-                    stripos($useragent, 'iPad') !== false;
-        $emailseparator = $ismacuser ? ',' : ';';
 
         if (empty($bookedusers)) {
             return '';
@@ -3540,11 +4131,11 @@ class booking_option {
         if (!empty($settings->teachers)) {
             foreach ($settings->teachers as $t) {
                 if (!empty($t->email) && ($t->email != $USER->email)) {
-                    $teachersstring .= "$t->email" . $emailseparator;
+                    $teachersstring .= "$t->email;";
                 }
             }
             if ($teachersstring) {
-                $teachersstring = trim($teachersstring, $emailseparator);
+                $teachersstring = trim($teachersstring, ';');
                 $teachersstring = "cc=$teachersstring&";
             }
         }
@@ -3553,10 +4144,10 @@ class booking_option {
         foreach ($bookedusers as $bu) {
             $user = singleton_service::get_instance_of_user($bu->userid);
             if (!empty($user->email)) {
-                $emailstring .= "$user->email" . $emailseparator;
+                $emailstring .= "$user->email;";
             }
         }
-        $emailstring = trim($emailstring, $emailseparator);
+        $emailstring = trim($emailstring, ';');
 
         if (empty($emailstring)) {
             return '';
@@ -3602,6 +4193,23 @@ class booking_option {
         }
         $jsonobject->{$key} = $value;
         $data->json = json_encode($jsonobject);
+    }
+
+    /**
+     * A helper to get data from the json of a booking option.
+     *
+     * @param stdClass $data reference to a data object containing the json key
+     * @param string $key - for example: "disablecancel"
+     * @return int|string|stdClass|array|null
+     */
+    public static function get_data_from_json(stdClass &$data, string $key) {
+        if (!empty($data->json)) {
+            $jsonobject = json_decode($data->json);
+            if (isset($jsonobject->{$key})) {
+                return $jsonobject->{$key};
+            }
+        }
+        return null;
     }
 
     /**
@@ -3729,6 +4337,14 @@ class booking_option {
         // If no ID provided we treat record as new and set id to "0".
         $optionid = is_array($data) ? ($data['id'] ?? 0) : ($data->id ?? 0);
         $originaloption = singleton_service::get_instance_of_booking_option_settings($optionid);
+        $originaloptionid = $originaloption->id ?? $originaloption->optionid ?? 0;
+        $originaloptionbookingid = $originaloption->bookingid ?? 0;
+        $originaloptionmaxanswers = $originaloption->maxanswers ?? 0;
+        $originaloptioncmid = $originaloption->cmid ?? 0;
+
+        $ba = singleton_service::get_instance_of_booking_answers($originaloption);
+        // Check if the original option is fully booked.
+        $originalfullybooked = $ba->is_fully_booked();
 
         // If $formdata is an array, we need to run set_data.
         if (is_array($data) || isset($data->importing)) {
@@ -3754,12 +4370,15 @@ class booking_option {
         if (!empty($newoption->id)) {
             // Save the changes to DB.
             if (!$DB->update_record("booking_options", $newoption)) {
-                throw new moodle_exception('updateofoptionwentwrong', 'mod_booking');
+                throw new moodle_exception('errorupdateofoptionwentwrong', 'mod_booking');
             }
         } else {
             // Save the changes to DB.
+            if (empty($newoption->identifier)) {
+                $newoption->identifier = self::create_truly_unique_option_identifier();
+            }
             if (!$optionid = $DB->insert_record("booking_options", $newoption)) {
-                throw new moodle_exception('creationofoptionwentwrong', 'mod_booking');
+                throw new moodle_exception('errorcreationofoptionwentwrong', 'mod_booking');
             }
             // Some legacy weight still left.
             $newoption->id = $optionid;
@@ -3767,33 +4386,53 @@ class booking_option {
         }
 
         $feedbackpostchanges = fields_info::save_fields_post($data, $newoption, $updateparam);
+        // We have to load waitforconfirmation status in order to know if sync_waiting_list.
+        $newoption->waitforconfirmation = self::get_value_of_json_by_key($newoption->id, "waitforconfirmation");
 
-        // We need to keep the previous values (before purging caches).
-        $oldsettings = singleton_service::get_instance_of_booking_option_settings($optionid);
         // Only now, we can purge.
         self::purge_cache_for_option($newoption->id);
 
         $option = singleton_service::get_instance_of_booking_option($data->cmid, $optionid);
 
         // Sync the waiting list and send status change mails.
-        if ($oldsettings->maxanswers < $newoption->maxanswers) {
+        if (
+            !empty($originaloptionid) // If we have an old option at all.
+            && !empty($originaloptionbookingid) // If it's not a template.
+            && ($originaloptionmaxanswers < ($newoption->maxanswers ?? 0)) // Only then we show if we need to sync.
+        ) {
             // We have more places now, so we can sync without danger.
 
             $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
 
-            $ba = singleton_service::get_instance_of_booking_answers($oldsettings);
-            $fullybooked = $ba->is_fully_booked();
-            // Check if the option is fully booked.
-            $option->sync_waiting_list();
+            // Do not sync waitinglist if it is enforced.
+            $option->sync_waiting_list(false, true);
+
+            if (get_config('booking', 'bookingdebugmode')) {
+                // If debug mode is enabled, we create a debug message.
+                $event = booking_debug::create([
+                    'objectid' => $optionid ?? 0,
+                    'context' => context_system::instance(),
+                    'relateduserid' => $USER->id ?? 0,
+                    'other' => [
+                        'originalfullybooked' => $originalfullybooked,
+                        'originaloptionid' => $originaloptionid,
+                        'originaloptionbookingid' => $originaloptionbookingid,
+                        'originaloptionmaxanswers' => $originaloptionmaxanswers,
+                        'newoptionmaxanswers' => $newoption->maxanswers ?? 0,
+                    ],
+                ]);
+                $event->trigger();
+            }
 
             // If it was fully booked, we need to trigger the places free again event.
-            self::check_if_free_to_book_again($settings, 0, $fullybooked);
+            self::check_if_free_to_book_again($settings, 0, $originalfullybooked);
         } else if (
-            $oldsettings->maxanswers > $newoption->maxanswers
+            ($originaloptionmaxanswers > ($newoption->maxanswers ?? 0))
             && !get_config('booking', 'keepusersbookedonreducingmaxanswers')
+            && empty($newoption->waitforconfirmation)
         ) {
             // We have less places now, so we only sync if the setting to keep users booked is turned off.
-            $option->sync_waiting_list();
+            $option->sync_waiting_list(false, true);
         }
         try {
             // Now check, if there are rules to execute.
@@ -3818,7 +4457,7 @@ class booking_option {
 
         // If there have been changes to significant fields, we react on changes.
         // Change notification will be sent (if active).
-        // Action logs will be stored ("Shwo recent updates..." link on bottom of option form).
+        // Action logs will be stored ("Show recent updates..." link on bottom of option form).
         $bu = new booking_utils();
 
         // New way of handling changes.
@@ -3826,10 +4465,22 @@ class booking_option {
             return !empty($value);
         });
         $changes = array_merge($feedbackpost, $feedbackformchanges);
-        $cmid = $originaloption->cmid ?? $data->cmid ?? 0;
+
+        // Set correct cmid.
+        if (empty($cmid = $originaloptioncmid)) {
+            $cmid = $data->cmid ?? 0;
+        }
+
         // Only react on changes if update is triggered via formsave (see comment at beginning of function - cases A) & B))...
         // ... since otherwise previous data is unreliable.
         if (!empty($changes) && $updateparam == MOD_BOOKING_UPDATE_OPTIONS_PARAM_DEFAULT) {
+            fields_info::all_changes_collected_actions(
+                $changes,
+                $data,
+                $newoption,
+                $originaloption
+            );
+
             // If we have no cmid, it's most possibly a template.
             if (!empty($cmid) && $newoption->bookingid != 0) {
                 // We only react on changes, if a cmid exists.
@@ -3843,7 +4494,7 @@ class booking_option {
         // Make sure, users are enroled to booking option when course is added after users already booked.
         $bo = singleton_service::get_instance_of_booking_option($cmid, $newoption->id);
         $ba = singleton_service::get_instance_of_booking_answers($bo->settings);
-        foreach ($ba->usersonlist as $bookeduser) {
+        foreach ($ba->get_usersonlist() as $bookeduser) {
             $bo->enrol_user_coursestart($bookeduser->id);
         }
 
@@ -3947,5 +4598,132 @@ class booking_option {
                 $event->trigger();
             }
         }
+    }
+
+    /**
+     * Create a new moodle url for bookingoptionview.
+     *
+     * @param int $optionid
+     * @param int $cmid
+     * @param string $texttodisplay
+     * @param int $userid
+     * @param array $linkattributes
+     */
+    public static function create_link_to_bookingoption(
+        int $optionid,
+        int $cmid,
+        string $texttodisplay,
+        int $userid = 0,
+        array $linkattributes = []
+    ) {
+        $params = [
+            'cmid' => $cmid,
+            'optionid' => $optionid,
+        ];
+        if (!empty($userid)) {
+            $params['userid'] = $userid;
+        }
+        $url = new moodle_url('/mod/booking/optionview.php', $params);
+
+        return html_writer::link($url->out(false), $texttodisplay, $linkattributes);
+    }
+
+    /**
+     * Insert a record into the booking history to make sure to log all the booking answer related activities.
+     *
+     * @param int $status
+     * @param int $answerid
+     * @param int $optionid
+     * @param int $bookingid
+     * @param int $userid
+     * @param array $additionalinfos
+     *
+     * @return int The id of the record inserted.
+     *
+     */
+    public static function booking_history_insert(
+        int $status,
+        int $answerid,
+        int $optionid = 0,
+        int $bookingid = 0,
+        int $userid = 0,
+        array $additionalinfos = []
+    ): int {
+        global $DB, $USER;
+        $json = json_encode($additionalinfos, true);
+
+        $data = (object) [
+            'status' => $status,
+            'userid' => $userid,
+            'answerid' => $answerid,
+            'optionid' => $optionid,
+            'bookingid' => $bookingid,
+            'timecreated' => time(),
+            'usermodified' => $USER->id,
+            'json' => $json,
+        ];
+        $idofnewrecord = $DB->insert_record('booking_history', $data);
+
+        // Now, delete the booking history cache.
+        cache_helper::purge_by_event('setbackbookinghistorytable');
+
+        return $idofnewrecord;
+    }
+
+    /**
+     * Check previous status of bookinganswer to be deleted and return updated status.
+     *
+     * @param object $ba
+     * @return string
+     *
+     */
+    public static function status_bookinganswer_deleted(object $ba): string {
+        switch ($ba->waitinglist) {
+            case MOD_BOOKING_STATUSPARAM_BOOKED:
+                $status = MOD_BOOKING_STATUSPARAM_BOOKED_DELETED;
+                break;
+            case MOD_BOOKING_STATUSPARAM_WAITINGLIST:
+                $status = MOD_BOOKING_STATUSPARAM_WAITINGLIST_DELETED;
+                break;
+            case MOD_BOOKING_STATUSPARAM_RESERVED:
+                $status = MOD_BOOKING_STATUSPARAM_RESERVED_DELETED;
+                break;
+            case MOD_BOOKING_STATUSPARAM_NOTIFYMELIST:
+                $status = MOD_BOOKING_STATUSPARAM_NOTIFYMELIST_DELETED;
+                break;
+            default:
+                $status = MOD_BOOKING_STATUSPARAM_DELETED;
+                break;
+        }
+        return $status;
+    }
+
+    /**
+     * Updates the waitinglist column to the given value in the booking answers table
+     * where the conditions are met.
+     * @param int $currentvalue
+     * @param int $newvalue
+     * @param int $userid
+     * @param int $optiondateid
+     * @return void
+     */
+    public static function change_booking_answer_waitinglist_status(
+        int $currentvalue,
+        int $newvalue,
+        int $userid,
+        int $optiondateid
+    ) {
+        global $DB;
+        // Update column waitinglist.
+        $DB->set_field(
+            'booking_answers',
+            'waitinglist',
+            $newvalue,
+            [
+                'optionid' => $optiondateid,
+                'userid' => $userid,
+                'waitinglist' => $currentvalue,
+            ]
+        );
     }
 }

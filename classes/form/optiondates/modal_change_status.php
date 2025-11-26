@@ -26,6 +26,8 @@
 
 namespace mod_booking\form\optiondates;
 
+use mod_booking\singleton_service;
+
 defined('MOODLE_INTERNAL') || die();
 
 global $CFG;
@@ -58,30 +60,43 @@ class modal_change_status extends dynamic_form {
         $mform = $this->_form;
 
         $cmid = $this->_ajaxformdata['cmid'] ?? 0;
-        $optionid = $this->_ajaxformdata['optionid'] ?? 0;
-        $optiondateid = $this->_ajaxformdata['optiondateid'] ?? 0;
-        $userid = $this->_ajaxformdata['userid'] ?? 0;
-
         $mform->addElement('hidden', 'cmid', $cmid);
         $mform->setType('cmid', PARAM_INT);
 
+        $optionid = $this->_ajaxformdata['optionid'] ?? 0;
         $mform->addElement('hidden', 'optionid', $optionid);
         $mform->setType('optionid', PARAM_INT);
 
-        $mform->addElement('hidden', 'optiondateid', $optiondateid);
-        $mform->setType('optiondateid', PARAM_INT);
+        $scope = $this->_ajaxformdata['scope'] ?? '';
+        $mform->addElement('hidden', 'scope', $scope);
+        $mform->setType('scope', PARAM_TEXT);
 
-        $mform->addElement('hidden', 'userid', $userid);
-        $mform->setType('userid', PARAM_INT);
+        /* IDs are passed in the following formats:
+        For option scope: optionid-userid
+        For optiondate scope: optionid-optiondateid-userid */
+        $mform->addElement('hidden', 'checkedids', '');
+        $mform->setType('checkedids', PARAM_TEXT);
 
-        $mform->addElement(
-            'select',
-            'status',
-            get_string('presence', 'mod_booking'),
-            booking::get_possible_presences(true)
-        );
-        $mform->setType('status', PARAM_INT);
-        $mform->setDefault('status', 0); // Empty string.
+        $mform->addElement('hidden', 'id', 0);
+        $mform->setType('id', PARAM_RAW);
+
+        if (!empty($this->_ajaxformdata['checkedids'])) {
+            $mform->addElement(
+                'select',
+                'status',
+                get_string('presence', 'mod_booking'),
+                booking::get_possible_presences(true)
+            );
+            $mform->setType('status', PARAM_INT);
+            $mform->setDefault('status', 0); // Empty string.
+        } else {
+            $mform->addElement(
+                'html',
+                '<div class="alert alert-warning">'
+                . get_string('norowsselected', 'mod_booking')
+                . '</div>'
+            );
+        }
     }
 
     /**
@@ -103,21 +118,67 @@ class modal_change_status extends dynamic_form {
      * @return mixed
      */
     public function process_dynamic_submission() {
-
+        global $DB;
         $data = $this->get_data();
+        $scope = $data->scope ?? '';
+        if (empty($scope)) {
+            return $data;
+        }
         if (empty($data->status)) {
             $data->status = 0;
         }
+        if (empty($data->optionid)) {
+            $data->optionid = 0;
+        }
+        if (empty($data->checkedids)) {
+            $data->checkedids = $data->id;
+        }
+        $checkedids = explode(',', $data->checkedids);
+        // Just to make sure, we have no empty IDs here.
+        $checkedids = array_filter($checkedids, fn($checkedid) => !empty($checkedid));
+        // If it's still empty at this point, we just return.
+        if (empty($checkedids)) {
+            return $data;
+        }
 
-        $userid = $this->_ajaxformdata['userid'];
-        $optiondateid = $this->_ajaxformdata['optiondateid'];
-        $optionid = $this->_ajaxformdata['optionid'];
-
-        $optiondateanswer = new optiondate_answer($userid, $optiondateid, $optionid);
-        $optiondateanswer->add_or_update_status($data->status);
-
+        /* IDs are passed in the following formats:
+        For option scope: optionid-userid
+        For optiondate scope: optionid-optiondateid-userid */
+        switch ($scope) {
+            case 'optiondate':
+                foreach ($checkedids as $checkedid) {
+                    [$optionid, $optiondateid, $userid] = explode('-', $checkedid);
+                    if (empty($optionid) || empty($optiondateid) || empty($userid)) {
+                        continue;
+                    }
+                    if (!is_int((int) $optionid) || !is_int((int) $optiondateid) || !is_int((int) $userid)) {
+                        continue;
+                    }
+                    $optiondateanswer = new optiondate_answer($userid, $optiondateid, $optionid);
+                    $optiondateanswer->add_or_update_status($data->status);
+                }
+                break;
+            case 'option':
+                $optionid = $data->optionid;
+                $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+                $cmid = $settings->cmid;
+                $answers = singleton_service::get_instance_of_booking_answers($settings);
+                $bookinganswers = $answers->get_answers();
+                $status = $data->status;
+                // Note: In option scope, we have normal booking answer IDs.
+                $selectedusers = [];
+                foreach ($checkedids as $answerid) {
+                    $answer = $bookinganswers[$answerid] ?? null;
+                    if (empty($answer) || empty($answer->userid)) {
+                        continue;
+                    }
+                    $selectedusers[] = $answer->userid;
+                }
+                $option = singleton_service::get_instance_of_booking_option($cmid, $optionid);
+                $option->changepresencestatus($selectedusers, $status);
+                break;
+        }
         cache_helper::purge_by_event('setbackbookedusertable');
-
         return $data;
     }
 
@@ -166,30 +227,36 @@ class modal_change_status extends dynamic_form {
      * @return moodle_url
      */
     protected function get_page_url_for_dynamic_submission(): moodle_url {
-        $optiondateid = $this->_ajaxformdata['optiondateid'] ?? 0;
-        if (empty($optiondateid)) {
-            $optiondateid = $this->optional_param('optiondateid', 0, PARAM_INT);
+        $scope = $this->_ajaxformdata['scope'] ?? '';
+        if (empty($scope)) {
+            return new moodle_url('/mod/booking/report2.php');
         }
-
+        // Optiondateid only exists in optiondate scope.
+        if ($scope == 'optiondate') {
+            $optiondateid = $this->_ajaxformdata['optiondateid'] ?? 0;
+            if (empty($optiondateid)) {
+                $optiondateid = $this->optional_param('optiondateid', 0, PARAM_INT);
+            }
+        }
+        // Optionid exists in both scopes (option and optiondate).
         $optionid = $this->_ajaxformdata['optionid'] ?? 0;
         if (empty($optionid)) {
             $optionid = $this->optional_param('optionid', 0, PARAM_INT);
         }
-
+        // Cmid exists in both scopes (option and optiondate).
         $cmid = $this->_ajaxformdata['cmid'] ?? 0;
         if (empty($cmid)) {
             $cmid = $this->optional_param('cmid', 0, PARAM_INT);
         }
-
+        // URL depending on available scope ids.
         if (!empty($optionid) && !empty($optiondateid)) {
             return new moodle_url('/mod/booking/report2.php', ['optionid' => $optionid, 'optiondateid' => $optiondateid]);
         } else if (!empty($optionid) && empty($optiondateid)) {
             return new moodle_url('/mod/booking/report2.php', ['optionid' => $optionid]);
         } else if (!empty($cmid)) {
             return new moodle_url('/mod/booking/report2.php', ['cmid' => $cmid]);
-        } else {
-            return new moodle_url('/mod/booking/report2.php');
         }
+        return new moodle_url('/mod/booking/report2.php');
     }
 
     /**

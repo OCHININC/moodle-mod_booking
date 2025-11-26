@@ -16,6 +16,7 @@
 
 namespace mod_booking\form;
 use context_module;
+use mod_booking\local\templaterule;
 use mod_booking\singleton_service;
 
 defined('MOODLE_INTERNAL') || die();
@@ -36,7 +37,6 @@ use moodle_url;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class rulesform extends dynamic_form {
-
     /**
      * {@inheritdoc}
      * @see moodleform::definition()
@@ -124,6 +124,17 @@ class rulesform extends dynamic_form {
             case 'rule_daysbefore':
                 if ($data['rule_daysbefore_datefield'] == '0') {
                     $errors['rule_daysbefore_datefield'] = get_string('error:choosevalue', 'mod_booking');
+                } else if (
+                    get_config('booking', 'uselegacymailtemplates')
+                    && $data['rule_daysbefore_datefield'] == 'optiondatestarttime'
+                ) {
+                    $linktosetting = new moodle_url(
+                        '/admin/settings.php',
+                        ['section' => 'modsettingbooking'],
+                        'admin-uselegacymailtemplates'
+                    );
+                    $errors['rule_daysbefore_datefield'] =
+                        get_string('error:deactivatelegacymailtemplates', 'mod_booking', $linktosetting);
                 }
                 break;
             case 'rule_react_on_event':
@@ -184,8 +195,10 @@ class rulesform extends dynamic_form {
                     '\mod_booking\event\custom_message_sent',
                     '\mod_booking\event\custom_bulk_message_sent',
                 ];
-                if (!isset($data["rule_react_on_event_event"]) ||
-                    !in_array($data["rule_react_on_event_event"], $allowedeventsformailcopy)) {
+                if (
+                    !isset($data["rule_react_on_event_event"]) ||
+                    !in_array($data["rule_react_on_event_event"], $allowedeventsformailcopy)
+                ) {
                     $errors['action_send_copy_of_mail_subject_prefix'] =
                         get_string('error:ruleactionsendcopynotpossible', 'mod_booking');
                     $errors['action_send_copy_of_mail_message_prefix'] =
@@ -264,8 +277,13 @@ class rulesform extends dynamic_form {
               'bookingruletemplate' => $id,
             ];
         }
-        // If we have an ID, we retrieve the right rule from DB.
-        $record = $DB->get_record('booking_rules', ['id' => $id]);
+
+        if ($id < 0) {
+            $record = templaterule::get_template_record_by_id($id);
+        } else {
+            // If we have an ID, we retrieve the right rule from DB.
+            $record = $DB->get_record('booking_rules', ['id' => $id]);
+        }
 
         $jsonboject = json_decode($record->rulejson);
 
@@ -303,9 +321,7 @@ class rulesform extends dynamic_form {
         // If we have applied the change template value, we override all the values we have submitted.
         if (!empty($formdata['btn_bookingruletemplates'])) {
             foreach ($values as $k => $v) {
-
                 if ($mform->elementExists($k) && $v !== null) {
-
                     if ($mform->elementExists($k) && $k != 'rule_name') {
                         $element = $mform->getElement($k);
 

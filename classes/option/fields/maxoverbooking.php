@@ -37,7 +37,6 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class maxoverbooking extends field_base {
-
     /**
      * This ID is used for sorting execution.
      * @var int
@@ -89,7 +88,8 @@ class maxoverbooking extends field_base {
         stdClass &$formdata,
         stdClass &$newoption,
         int $updateparam,
-        $returnvalue = null): array {
+        $returnvalue = null
+    ): array {
 
         if (!empty($formdata->maxoverbooking)) {
             $newoption->limitanswers = 1;
@@ -127,6 +127,7 @@ class maxoverbooking extends field_base {
             }
 
             $mform->addElement('text', 'maxoverbooking', get_string('maxoverbooking', 'mod_booking'));
+            $mform->addHelpButton('maxoverbooking', 'maxoverbooking', 'mod_booking');
             $mform->setType('maxoverbooking', PARAM_INT);
         }
     }

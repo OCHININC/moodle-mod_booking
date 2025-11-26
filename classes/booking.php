@@ -30,6 +30,7 @@ use course_modinfo;
 use html_writer;
 use local_entities\local\entities\entitydate;
 use mod_booking\bo_availability\bo_info;
+use mod_booking\customfield\booking_handler;
 use mod_booking\local\modechecker;
 use mod_booking\teachers_handler;
 use mod_booking\utils\wb_payment;
@@ -107,8 +108,8 @@ class booking {
 
         if (!$this->cm) {
             // ERROR: The instance does not exist.
-            // But we do not want our site to crash, so we return null.
-            return null;
+            // But we do not want our site to crash, so we simply return.
+            return;
         }
 
         // In the constructur, we call the booking_settings, where we get the values from db or cache.
@@ -118,7 +119,7 @@ class booking {
         $this->id = $this->settings->id;
 
         $this->course = get_course($this->cm->course);
-        $this->context = \context_module::instance($cmid);
+        $this->context = context_module::instance($cmid);
 
         // If the course has groups and I do not have the capability to see all groups, show only
         // users of my groups.
@@ -336,25 +337,61 @@ class booking {
      * @param string $query
      * @return array
      */
-    public static function load_teachers(string $query) {
+    public static function load_teachers_for_webservice(string $query) {
         global $DB;
 
         $values = explode(' ', $query);
 
-        $fullsql = $DB->sql_concat('u.firstname', '\'\'', 'u.lastname', '\'\'', 'u.email');
-
-        $sql = "SELECT * FROM (
-                    SELECT DISTINCT u.*
-                    FROM {user} u
-                    JOIN (
-                        SELECT DISTINCT userid
-                        FROM {booking_teachers}
-                    ) bt
-                    ON bt.userid = u.id
-                    WHERE u.deleted = 0
-                ) AS fulltexttable";
-        // Check for u.deleted = 0 is important, so we do not load any deleted users!
         $params = [];
+
+        $fullsql = $DB->sql_concat(
+            '\' \'',
+            'u.id',
+            '\' \'',
+            'u.firstname',
+            '\' \'',
+            'u.lastname',
+            '\' \'',
+            'u.email',
+            '\' \''
+        );
+
+        // By default, ALL users can be selected as teachers.
+        $sql = "SELECT * FROM (
+                SELECT DISTINCT u.id, u.firstname, u.lastname, u.email, $fullsql AS fulltextstring
+                FROM {user} u
+                WHERE u.deleted = 0
+            ) AS fulltexttable";
+
+        /*
+        If the setting 'selectteacherswithprofilefieldonly' is on, then only teachers
+        with a certain profile field value can be selected.
+        This can be defined in config settings.
+        */
+        if (get_config('booking', 'selectteacherswithprofilefieldonly')) {
+            $selectteacherswithprofilefieldonlyfield = get_config('booking', 'selectteacherswithprofilefieldonlyfield');
+            $selectteacherswithprofilefieldonlyvalue = get_config('booking', 'selectteacherswithprofilefieldonlyvalue');
+            if (!empty($selectteacherswithprofilefieldonlyfield) && !empty($selectteacherswithprofilefieldonlyvalue)) {
+                $fieldvalues = array_map('trim', explode(',', $selectteacherswithprofilefieldonlyvalue));
+                // Only in this case, we overwrite the SQL.
+                [$inorequal, $inparams] = $DB->get_in_or_equal($fieldvalues, SQL_PARAMS_NAMED, 'profilefieldvalue');
+                $sql =
+                    "SELECT * FROM (
+                        SELECT DISTINCT u.id, u.firstname, u.lastname, u.email, $fullsql AS fulltextstring
+                        FROM {user} u
+                        JOIN {user_info_data} uid ON uid.userid = u.id
+                        JOIN {user_info_field} uif ON uif.id = uid.fieldid
+                        WHERE u.deleted = 0
+                        AND uif.shortname = :profilefieldname
+                        AND TRIM(uid.data) $inorequal
+                    ) AS fulltexttable";
+
+                $params['profilefieldname'] = trim($selectteacherswithprofilefieldonlyfield);
+                $params = array_merge($params, $inparams);
+            }
+        }
+
+        // Check for u.deleted = 0 is important, so we do not load any deleted users!
         if (!empty($query)) {
             // We search for every word extra to get better results.
             $firstrun = true;
@@ -401,10 +438,10 @@ class booking {
      */
     public function get_canbook_userids() {
 
-        $this->canbookusers = get_enrolled_users($this->context, 'mod/booking:choose', null, 'u.id');
+        $this->canbookusers = get_enrolled_users($this->context, 'mod/booking:choose', 0, 'u.id');
 
         // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
-        // TODO check if course has guest access if not get all enrolled users and check with...
+        // Todo check if course has guest access if not get all enrolled users and check with...
         // ...has_capability if user has right to book.
         // CODEBEGIN $this->canbookusers = get_users_by_capability($this->context, 'mod/booking:choose', CODEEND.
         // CODEBEGIN 'u.id', 'u.lastname ASC, u.firstname ASC', '', '', '', CODEEND.
@@ -487,8 +524,7 @@ class booking {
      *
      * @param string $searchtext
      *
-     * @return void
-     *
+     * @return int
      */
     public function get_all_options_count($searchtext = '') {
         global $DB;
@@ -555,8 +591,7 @@ class booking {
      * @param mixed $bookingid
      * @param string $searchtext
      *
-     * @return void
-     *
+     * @return int
      */
     public function get_active_optionids_count($bookingid, $searchtext = '') {
         global $DB;
@@ -627,7 +662,7 @@ class booking {
      *
      * @param string $searchstring
      *
-     * @return void
+     * @return int
      *
      */
     public function get_my_bookingids_count($searchstring = '') {
@@ -706,7 +741,7 @@ class booking {
             AND ba.userid = ?
             AND ba.waitinglist <= ?
             AND (bo.courseendtime = 0 OR bo.courseendtime > ?)",
-            [$this->id, $user->id, MOD_BOOKING_STATUSPARAM_WAITINGLIST, time()]
+            [$this->id, $user->id, MOD_BOOKING_STATUSPARAM_BOOKED, time()]
         );
 
         return (int)$activebookingcount;
@@ -803,6 +838,10 @@ class booking {
                     $headers[] = get_string('course', 'core');
                     $columns[] = 'course';
                     break;
+                case 'courseshortname':
+                    $headers[] = get_string('courseshortname', 'mod_booking');
+                    $columns[] = 'courseshortname';
+                    break;
                 case 'minanswers':
                     $headers[] = get_string('minanswers', 'mod_booking');
                     $columns[] = 'minanswers';
@@ -818,6 +857,26 @@ class booking {
                 case 'bookingclosingtime':
                     $headers[] = get_string('bookingclosingtime', 'mod_booking');
                     $columns[] = 'bookingclosingtime';
+                    break;
+                case 'invisible':
+                        $columns[] = 'invisible';
+                        $headers[] = get_string('visibilitystatus', 'mod_booking');
+                    break;
+                case 'price': // This is only possible, if local shoppingcart is installed.
+                    if (class_exists('local_shopping_cart\shopping_cart')) {
+                        $columns[] = 'price';
+                        $headers[] = get_string('price', 'mod_booking');
+                    }
+                    break;
+                default:
+                    $customfields = booking_handler::get_customfields();
+                    foreach ($customfields as $customfield) {
+                        if ($value !== $customfield->shortname) {
+                            continue;
+                        }
+                        $headers[] = format_string($customfield->name);
+                        $columns[] = $value;
+                    }
                     break;
             }
         }
@@ -916,10 +975,8 @@ class booking {
                     $headers[] = get_string("waitinglist", "booking");
                     break;
                 case 'status':
-                    if ($this->settings->enablepresence) {
-                        $columns[] = 'status';
-                        $headers[] = get_string('presence', 'mod_booking');
-                    }
+                    $columns[] = 'status';
+                    $headers[] = get_string('presence', 'mod_booking');
                     break;
                 case 'groups':
                     $columns[] = 'groups';
@@ -947,6 +1004,10 @@ class booking {
                 case 'timecreated':
                     $columns[] = 'timecreated';
                     $headers[] = get_string('timecreated', 'mod_booking');
+                    break;
+                case 'certificate':
+                        $headers[] = get_string('certificate', 'mod_booking');
+                        $columns[] = 'certificate';
                     break;
             }
         }
@@ -1042,7 +1103,7 @@ class booking {
 
     /**
      * Genereate SQL and params array to fetch all options.
-     * No prefixes for the columsn we retrieve, so *, id, etc.
+     * No prefixes for the columns we retrieve, so *, id, etc.
      * If we don't pass on the context object, invisible options are excluded.
      *
      * @param int $limitfrom
@@ -1091,6 +1152,7 @@ class booking {
      * @param array $bookingparams
      * @param string $additionalwhere
      * @param string $innerfrom
+     *
      * @return array
      */
     public static function get_options_filter_sql(
@@ -1133,7 +1195,8 @@ class booking {
         // If the user does not have the capability to see invisible options...
         if (!$context || !has_capability('mod/booking:canseeinvisibleoptions', $context)) {
             // If we have a direct link, we only hide totally invisible options.
-            if (isset($where['id'])) {
+            // Also, if the user has already booked and looks at her table, she should see it.
+            if (isset($where['id']) || !empty($userid)) {
                 $where = " invisible <> 1 ";
             } else {
                 // ... then only show visible options.
@@ -1155,10 +1218,10 @@ class booking {
             $innerfrom .= " JOIN {booking_answers} ba
                           ON ba.optionid=bo.id ";
 
-            $outerfrom .= ", ba.waitinglist, ba.userid as bookeduserid ";
+            $outerfrom .= ", ba.waitinglist, ba.userid as bookeduserid, ba.completed ";
             $where .= " AND waitinglist $inorequal
                         AND bookeduserid=:bookeduserid ";
-            $groupby .= " , ba.waitinglist, ba.userid ";
+            $groupby .= " , ba.waitinglist, ba.userid, ba.completed ";
 
             $params['bookeduserid'] = $userid;
 
@@ -1169,7 +1232,7 @@ class booking {
         [$select1, $from1, $filter1, $params1] = booking_option_settings::return_sql_for_customfield();
         [$select2, $from2, $filter2, $params2] = booking_option_settings::return_sql_for_teachers();
         [$select3, $from3, $filter3, $params3] = booking_option_settings::return_sql_for_imagefiles();
-        [$select4, $from4, $filter4, $params4, $conditionsql] = bo_info::return_sql_from_conditions();
+        [$select4, $from4, $filter4, $params4, $conditionsql] = bo_info::return_sql_from_conditions($userid ?? 0);
 
         // The $outerfrom takes all the select from the supplementary selects.
         $outerfrom .= !empty($select1) ? ", $select1 " : '';
@@ -1234,6 +1297,34 @@ class booking {
             }
         }
 
+        self::apply_wherearray($where, $wherearray, $params, $counter);
+
+        // We add sql from conditions, if there is any.
+        if (!empty($conditionsql)) {
+            $where .= " AND " . $conditionsql;
+        }
+
+        // We add additional conditions to $where, if there are any.
+        if (!empty($additionalwhere)) {
+            $where .= " AND " . $additionalwhere;
+        }
+
+        return [$fields, $from, $where, $params, $filter];
+    }
+
+    /**
+     * Apply wherearray to wherestring.
+     *
+     * @param string $where
+     * @param array $wherearray
+     * @param array $params
+     * @param int $counter
+     *
+     * @return void
+     *
+     */
+    public static function apply_wherearray(string &$where, array &$wherearray, array &$params, int $counter) {
+        global $DB;
         foreach ($wherearray as $key => $value) {
             // Be sure to have a lower key string.
             $paramsvaluekey = "param";
@@ -1258,14 +1349,11 @@ class booking {
                             $paramsvaluekey .= $counter;
                             $counter++;
                         }
-
                         $orstring[] = " " . $DB->sql_like("$key", ":$paramsvaluekey", false) . " ";
                         $params[$paramsvaluekey] = $arrayvalue;
                     }
                 }
-
                 $where .= implode(' OR ', $orstring);
-
                 $where .= " ) ";
             } else if (gettype($value) == 'integer') {
                 $where .= " AND   $key = $value";
@@ -1274,18 +1362,6 @@ class booking {
                 $params[$paramsvaluekey] = $value;
             }
         }
-
-        // We add sql from conditions, if there is any.
-        if (!empty($conditionsql)) {
-            $where .= " AND " . $conditionsql;
-        }
-
-        // We add additional conditions to $where, if there are any.
-        if (!empty($additionalwhere)) {
-            $where .= " AND " . $additionalwhere;
-        }
-
-        return [$fields, $from, $where, $params, $filter];
     }
 
     /**
@@ -1293,7 +1369,7 @@ class booking {
      *
      * @param int $teacherid
      * @param int $bookingid booking instance id - not cmid!
-     * @return void
+     * @return array
      */
     public static function get_all_options_of_teacher_sql(int $teacherid, int $bookingid) {
 
@@ -1316,7 +1392,7 @@ class booking {
      * @param string $searchtext
      * @param string $fields
      * @param array $booked
-     * @return void
+     * @return array
      */
     public function get_my_options_sql(
         $limitfrom = 0,
@@ -1384,7 +1460,7 @@ class booking {
 
         // See github issue: https://github.com/Wunderbyte-GmbH/moodle-mod_booking/issues/305.
         // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
-        // TODO: We currently encode the whole URL, but we should only encode the params.
+        // Todo: We currently encode the whole URL, but we should only encode the params.
         // Encoding the whole URL makes migration to a new WWWROOT impossible.
 
         $encodedurl = base64_encode($moodleurl->out(false));
@@ -1407,12 +1483,12 @@ class booking {
     public static function return_array_of_entity_dates(array $areas): array {
 
         // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
-        // TODO: Now that the SQL has been changed, we need to fix this function!
+        // Todo: Now that the SQL has been changed, we need to fix this function!
 
         global $DB, $USER, $PAGE;
 
         // Get the SQL to retrieve all the right IDs.
-        $sql = self::return_sql_for_options_dates($areas);
+        $sql = self::return_sql_for_options_dates();
         $params = [];
 
         if (!empty($areas['option'])) {
@@ -1710,7 +1786,6 @@ class booking {
 
         $keystoexclude = [
             'introformat',
-            'customtemplateid',
             'timemodified',
             'json', // Changes in JSON are currently not supported.
         ];
@@ -1874,6 +1949,7 @@ class booking {
      * @return array of possible presence statuses
      */
     public static function get_possible_presences(bool $withempty = true) {
+        $allpossiblepresences = self::get_array_of_possible_presence_statuses();
         if ($withempty) {
             $presences[0] = '';
         }
@@ -1884,20 +1960,183 @@ class booking {
                 || (count($storedpresences) == 1 && empty($storedpresences[0]))
             ) {
                 // Fallback: If no presences were set at all, use all possible presences.
-                foreach (MOD_BOOKING_ALL_POSSIBLE_PRESENCES_ARRAY as $key => $value) {
+                foreach ($allpossiblepresences as $key => $value) {
                     $presences[$key] = $value;
                 }
             } else {
                 foreach ($storedpresences as $id) {
-                    $presences[$id] = MOD_BOOKING_ALL_POSSIBLE_PRESENCES_ARRAY[$id];
+                    $presences[$id] = $allpossiblepresences[$id];
                 }
             }
         } else {
             // Without PRO version, use all possible presences.
-            foreach (MOD_BOOKING_ALL_POSSIBLE_PRESENCES_ARRAY as $key => $value) {
+            foreach ($allpossiblepresences as $key => $value) {
                 $presences[$key] = $value;
             }
         }
         return $presences;
+    }
+
+    /**
+     * Helper function to get an array of possible views.
+     * @return array of possible views
+     */
+    public static function get_array_of_possible_views(): array {
+        // List view is always possible.
+        $viewparamoptions = [MOD_BOOKING_VIEW_PARAM_LIST => get_string('viewparam:list', 'mod_booking')];
+        // Additional views like cards view are a PRO feature.
+        if (wb_payment::pro_version_is_activated()) {
+            $viewparamoptions[MOD_BOOKING_VIEW_PARAM_CARDS] = get_string('viewparam:cards', 'mod_booking');
+            $viewparamoptions[MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT] = get_string('viewparam:listimgleft', 'mod_booking');
+            $viewparamoptions[MOD_BOOKING_VIEW_PARAM_LIST_IMG_RIGHT] = get_string('viewparam:listimgright', 'mod_booking');
+            $viewparamoptions[MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT_HALF] = get_string('viewparam:listimglefthalf', 'mod_booking');
+        }
+        return $viewparamoptions;
+    }
+
+    /**
+     * Helper function to get an array of possible presence statuses.
+     * @return array of possible presence statuses
+     */
+    public static function get_array_of_possible_presence_statuses(): array {
+        return [
+            MOD_BOOKING_PRESENCE_STATUS_NOTSET => get_string('statusnotset', 'mod_booking'),
+            MOD_BOOKING_PRESENCE_STATUS_UNKNOWN => get_string('statusunknown', 'mod_booking'),
+            MOD_BOOKING_PRESENCE_STATUS_ATTENDING => get_string('statusattending', 'mod_booking'),
+            MOD_BOOKING_PRESENCE_STATUS_COMPLETE => get_string('statuscomplete', 'mod_booking'),
+            MOD_BOOKING_PRESENCE_STATUS_INCOMPLETE => get_string('statusincomplete', 'mod_booking'),
+            MOD_BOOKING_PRESENCE_STATUS_NOSHOW => get_string('statusnoshow', 'mod_booking'),
+            MOD_BOOKING_PRESENCE_STATUS_FAILED => get_string('statusfailed', 'mod_booking'),
+            MOD_BOOKING_PRESENCE_STATUS_EXCUSED => get_string('statusexcused', 'mod_booking'),
+        ];
+    }
+
+    /**
+     * Helper function to get an array of possible booking history statuses.
+     * @return array of possible booking history statuses
+     */
+    public static function get_array_of_possible_booking_history_statuses(): array {
+        return [
+            MOD_BOOKING_STATUSPARAM_BOOKED => get_string('booked', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_WAITINGLIST => get_string('waitinglist', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_RESERVED => get_string('vuebookingstatsreserved', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_NOTIFYMELIST => get_string('bocondnotifymelist', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_NOTBOOKED => get_string('notbooked', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_DELETED => get_string('deleted', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_BOOKED_DELETED => get_string('bookeddeleted', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_WAITINGLIST_DELETED => get_string('waitinglistdeleted', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_WAITINGLIST_CONFIRMED => get_string('waitinglistconfirmed', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_RESERVED_DELETED => get_string('reserveddeleted', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_NOTIFYMELIST_DELETED => get_string('notifymelistdeleted', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_PRESENCE_CHANGED => get_string('presencechanged', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_BOOKINGOPTION_MOVED => get_string('optionmoved', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_NOTES_EDITED => get_string('notesedited', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_COMPLETION_CHANGED => get_string('completionchanged', 'mod_booking'),
+            MOD_BOOKING_STATUSPARAM_CONFIRMATION_DELETED => get_string('confirmationdeleted', 'mod_booking'),
+        ];
+    }
+
+    /**
+     * Helper function to get an array of days before and after for a select.
+     * @param int $start if you want to start with 30 days before, set this to -30
+     * @param int $end number of days after
+     * @return array of days before and after
+     */
+    public static function get_array_of_days_before_and_after(int $start, int $end): array {
+        $numberofdaysbefore = [];
+        for ($i = $start; $i <= $end; $i++) {
+            if (($i >= -10 && $i <= 10) || ($i % 5 == 0)) {
+                if ($i < 0) {
+                    $int = $i * -1;
+                    $numberofdaysbefore[$i] = get_string('daysafter', 'mod_booking', $int);
+                } else if ($i > 0) {
+                    $numberofdaysbefore[$i] = get_string('daysbefore', 'mod_booking', $i);
+                } else if ($i == 0) {
+                    $numberofdaysbefore[$i] = get_string('sameday', 'mod_booking', $i);
+                }
+            }
+        }
+        return $numberofdaysbefore;
+    }
+
+    /**
+     * Helper function to convert all prices in provided array
+     * into strings with 2 fixed decimals.
+     *
+     * @param array $data reference to the data array.
+     */
+    public static function convert_prices_to_number_format(array &$data) {
+        // Render all prices to 2 fixed decimals.
+        if (!empty($data['price'])) {
+            $data['price'] = format_float(round((float) $data['price'], 2), 2);
+        }
+        if (!empty($data['initialtotal'])) {
+            $data['initialtotal'] = format_float(round((float) $data['initialtotal'], 2), 2);
+        }
+        if (!empty($data['initialtotal_net'])) {
+            $data['initialtotal_net'] = format_float(round((float) $data['initialtotal_net'], 2), 2);
+        }
+        if (!empty($data['discount'])) {
+            $data['discount'] = format_float(round((float) $data['discount'], 2), 2);
+        }
+        if (!empty($data['deductible'])) {
+            $data['deductible'] = format_float(round((float) $data['deductible'], 2), 2);
+        }
+        if (!empty($data['credit'])) {
+            $data['credit'] = format_float(round((float) $data['credit'], 2), 2);
+        }
+        if (!empty($data['remainingcredit'])) {
+            $data['remainingcredit'] = format_float(round((float) $data['remainingcredit'], 2), 2);
+        }
+        if (!empty($data['price_net'])) {
+            $data['price_net'] = format_float(round((float) $data['price_net'], 2), 2);
+        }
+        if (!empty($data['price_gross'])) {
+            $data['price_gross'] = format_float(round((float) $data['price_gross'], 2), 2);
+        }
+        // Also convert prices for each item.
+        if (!empty($data['items'])) {
+            foreach ($data['items'] as &$item) {
+                $item['price'] = format_float(round((float) $item['price'], 2), 2);
+                if (!empty($item['price_net'])) {
+                    $item['price_net'] = format_float(round((float) $item['price_net'], 2), 2);
+                }
+                if (!empty($item['price_gross'])) {
+                    $item['price_gross'] = format_float(round((float) $item['price_gross'], 2), 2);
+                }
+            }
+            $data['items'] = array_values($data['items']);
+        }
+        // Also convert prices for each history item.
+        if (!empty($data['historyitems'])) {
+            foreach ($data['historyitems'] as &$hitem) {
+                $hitem['price'] = format_float(round((float) $hitem['price'], 2), 2);
+                if (!empty($hitem['price_net'])) {
+                    $hitem['price_net'] = format_float(round((float) $hitem['price_net'], 2), 2);
+                }
+                if (!empty($hitem['price_gross'])) {
+                    $hitem['price_gross'] = format_float(round((float) $hitem['price_gross'], 2), 2);
+                }
+            }
+            $data['historyitems'] = array_values($data['historyitems']);
+        }
+    }
+
+    /**
+     * Helper function to check if cmid belongs to
+     * still existing booking instance.
+     *
+     * @param int $cmid the course module id to check
+     */
+    public static function is_valid_booking_cmid(int $cmid): bool {
+        global $DB;
+        $sql = "SELECT cm.id
+                  FROM {course_modules} cm
+                  JOIN {modules} m ON m.id=cm.module
+                 WHERE m.name='booking'
+                   AND deletioninprogress=0
+                   AND cm.id=:cmid";
+        $params = ['cmid' => $cmid];
+        return !empty($DB->get_records_sql($sql, $params));
     }
 }

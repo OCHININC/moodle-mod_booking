@@ -93,15 +93,31 @@ class confirmbookwithcredits implements bo_condition {
         // This is the return value. Not available to begin with.
         $isavailable = false;
 
+        if (!get_config('booking', 'bookwithcreditsactive')) {
+            // If we do not use credits, this condition is always true.
+            return true;
+        }
+
         // If there is no cache blocking, we do nothing.
         $cache = cache::make('mod_booking', 'confirmbooking');
         $cachekey = $userid . "_" . $settings->id . '_bookwithcredits';
 
-        if (!$blocktime = $cache->get($cachekey)) {
+        // For performance reasons, we get only the cache of a given user.
+        // Via the static acceleration, the check for a lot of options is faster.
+        $cachedata = $cache->get($userid);
+
+        if ($cachedata === false) {
+            $cache->set($userid, []);
+        }
+
+        if (
+            $cachedata === false
+            || !isset($cachedata[$cachekey])
+        ) {
             $isavailable = true;
         } else {
             $limittime = strtotime('- ' . MOD_BOOKING_TIME_TO_CONFIRM . ' seconds', time());
-            if ($limittime > $blocktime) {
+            if ($limittime > $cachedata[$cachekey]) {
                 $isavailable = true;
             }
         }
@@ -118,10 +134,10 @@ class confirmbookwithcredits implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }

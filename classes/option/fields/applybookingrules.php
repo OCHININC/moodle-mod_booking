@@ -77,7 +77,6 @@ class applybookingrules extends field_base {
     public static $alternativeimportidentifiers = [
         'skipbookingrulesmode',
         'skipbookingrules',
-
     ];
 
     /**
@@ -127,8 +126,8 @@ class applybookingrules extends field_base {
         $instance = new applybookingrules();
         $mockdata = new stdClass();
         $mockdata->id = $formdata->optionid ?? $formdata->id;
-        $mockdata->skipbookingrules = $formdata->skipbookingrules;
-        $mockdata->skipbookingrulesmode = $formdata->skipbookingrulesmode;
+        $mockdata->skipbookingrules = $formdata->skipbookingrules ?? [];
+        $mockdata->skipbookingrulesmode = $formdata->skipbookingrulesmode ?? 0;
 
         // Todo: Write changes function.
         $changes1 = $instance->check_for_changes($formdata, $instance, $mockdata, 'skipbookingrulesmode');
@@ -152,8 +151,13 @@ class applybookingrules extends field_base {
         $fieldstoinstanciate = [],
         $applyheader = true
     ) {
-
-        $context = context_module::instance($formdata['cmid']);
+        if (!empty($formdata['context'])) {
+            $context = $formdata['context'];
+        } else if (!empty($formdata['cmid'])) {
+            $context = context_module::instance($formdata['cmid']);
+        } else {
+            $context = context_system::instance();
+        }
 
         // Standardfunctionality to add a header to the mform (only if its not yet there).
         if ($applyheader) {
@@ -172,10 +176,10 @@ class applybookingrules extends field_base {
             $ruleobject = json_decode($rule->rulejson);
             $context = context::instance_by_id($rule->contextid);
 
-            if (get_class($context) === 'core\context\system') {
+            if ($context->contextlevel === CONTEXT_SYSTEM) {
                 $contextname = get_string('system', 'mod_booking');
             } else {
-                $booking = singleton_service::get_instance_of_booking_settings_by_cmid($formdata['cmid']);
+                $booking = singleton_service::get_instance_of_booking_settings_by_cmid($context->instanceid);
                 $contextname = $booking->name;
             }
 
@@ -183,7 +187,7 @@ class applybookingrules extends field_base {
         }
 
         $options = [
-            'noselectionstring' => get_string('noinstitutionselected', 'mod_booking'),
+            'noselectionstring' => get_string('noruleselected', 'mod_booking'),
             'tags' => false,
             'multiple' => true,
         ];

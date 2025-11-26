@@ -37,6 +37,7 @@ use core_privacy\local\request\helper;
 use core_privacy\local\request\userlist;
 use core_privacy\local\request\writer;
 use dml_exception;
+use mod_booking\booking;
 use mod_booking\teachers_handler;
 use stdClass;
 
@@ -49,14 +50,12 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class provider implements
-    // This plugin stores personal data.
-    \core_privacy\local\metadata\provider,
-
     // This plugin is capable of determining which users have data within it.
     \core_privacy\local\request\core_userlist_provider,
-
     // This plugin is a core_user_data_provider.
-    \core_privacy\local\request\plugin\provider {
+    \core_privacy\local\request\plugin\provider,
+    // This plugin stores personal data.
+    \core_privacy\local\metadata\provider {
     /**
      * Return the fields which contain personal data.
      *
@@ -68,102 +67,112 @@ class provider implements
         $collection->add_database_table(
             'booking_answers',
             [
-                'userid' => 'privacy:metadata:booking_answers:userid',
-                'bookingid' => 'privacy:metadata:booking_answers:bookingid',
-                'optionid' => 'privacy:metadata:booking_answers:optionid',
-                'completed' => 'privacy:metadata:booking_answers:completed',
-                'timemodified' => 'privacy:metadata:booking_answers:timemodified',
-                'timecreated' => 'privacy:metadata:booking_answers:timecreated',
-                'waitinglist' => 'privacy:metadata:booking_answers:waitinglist',
-                'frombookingid' => 'privacy:metadata:booking_answers:frombookingid',
-                'numrec' => 'privacy:metadata:booking_answers:numrec',
-                'status' => 'privacy:metadata:booking_answers:status',
-                'notes' => 'privacy:metadata:booking_answers:notes',
+                'userid' => 'privacy:metadata:bookinganswers:userid',
+                'bookingid' => 'privacy:metadata:bookinganswers:bookingid',
+                'optionid' => 'privacy:metadata:bookinganswers:optionid',
+                'completed' => 'privacy:metadata:bookinganswers:completed',
+                'timemodified' => 'privacy:metadata:bookinganswers:timemodified',
+                'timecreated' => 'privacy:metadata:bookinganswers:timecreated',
+                'waitinglist' => 'privacy:metadata:bookinganswers:waitinglist',
+                'frombookingid' => 'privacy:metadata:bookinganswers:frombookingid',
+                'numrec' => 'privacy:metadata:bookinganswers:numrec',
+                'status' => 'privacy:metadata:bookinganswers:status',
+                'notes' => 'privacy:metadata:bookinganswers:notes',
             ],
-            'privacy:metadata:booking_answers'
+            'privacy:metadata:bookinganswers'
+        );
+
+        $collection->add_database_table(
+            'booking_history',
+            [
+                'userid' => 'privacy:metadata:bookinghistory:userid',
+                'status' => 'privacy:metadata:bookinghistory:status',
+                'json' => 'privacy:metadata:bookinghistory:json',
+            ],
+            'privacy:metadata:bookinghistory'
         );
 
         $collection->add_database_table(
             'booking_ratings',
             [
-                'userid' => 'privacy:metadata:booking_ratings:userid',
-                'optionid' => 'privacy:metadata:booking_ratings:optionid',
-                'rate' => 'privacy:metadata:booking_ratings:rate',
+                'userid' => 'privacy:metadata:bookingratings:userid',
+                'optionid' => 'privacy:metadata:bookingratings:optionid',
+                'rate' => 'privacy:metadata:bookingratings:rate',
             ],
-            'privacy:metadata:booking_ratings'
+            'privacy:metadata:bookingratings'
         );
 
         $collection->add_database_table(
             'booking_teachers',
             [
-                'bookingid' => 'privacy:metadata:booking_teachers:bookingid',
-                'userid' => 'privacy:metadata:booking_teachers:userid',
-                'optionid' => 'privacy:metadata:booking_teachers:optionid',
-                'completed' => 'privacy:metadata:booking_teachers:completed',
-                'calendarid' => 'privacy:metadata:booking_teachers:calendarid',
+                'bookingid' => 'privacy:metadata:bookingteachers:bookingid',
+                'userid' => 'privacy:metadata:bookingteachers:userid',
+                'optionid' => 'privacy:metadata:bookingteachers:optionid',
+                'completed' => 'privacy:metadata:bookingteachers:completed',
+                'calendarid' => 'privacy:metadata:bookingteachers:calendarid',
             ],
-            'privacy:metadata:booking_teachers'
+            'privacy:metadata:bookingteachers'
         );
 
         $collection->add_database_table(
             'booking_icalsequence',
             [
-                'userid' => 'privacy:metadata:booking_icalsequence:userid',
-                'optionid' => 'privacy:metadata:booking_icalsequence:optionid',
-                'sequencevalue' => 'privacy:metadata:booking_icalsequence:sequencevalue',
+                'userid' => 'privacy:metadata:bookingicalsequence:userid',
+                'optionid' => 'privacy:metadata:bookingicalsequence:optionid',
+                'sequencevalue' => 'privacy:metadata:bookingicalsequence:sequencevalue',
             ],
-            'privacy:metadata:booking_icalsequence'
+            'privacy:metadata:bookingicalsequence'
         );
 
         $collection->add_database_table(
             'booking_userevents',
             [
-                'userid' => 'privacy:metadata:booking_userevents:userid',
-                'optionid' => 'privacy:metadata:booking_userevents:optionid',
-                'optiondateid' => 'privacy:metadata:booking_userevents:optiondateid',
-                'eventid' => 'privacy:metadata:booking_userevents:eventid',
+                'userid' => 'privacy:metadata:bookinguserevents:userid',
+                'optionid' => 'privacy:metadata:bookinguserevents:optionid',
+                'optiondateid' => 'privacy:metadata:bookinguserevents:optiondateid',
+                'eventid' => 'privacy:metadata:bookinguserevents:eventid',
             ],
-            'privacy:metadata:booking_userevents'
+            'privacy:metadata:bookinguserevents'
         );
 
         $collection->add_database_table(
             'booking_optiondates_teachers',
             [
-                'optiondateid' => 'privacy:metadata:booking_optiondates_teachers:optiondateid',
-                'userid' => 'privacy:metadata:booking_optiondates_teachers:userid',
+                'optiondateid' => 'privacy:metadata:bookingoptiondatesteachers:optiondateid',
+                'userid' => 'privacy:metadata:bookingoptiondatesteachers:userid',
             ],
-            'privacy:metadata:booking_optiondates_teachers'
+            'privacy:metadata:bookingoptiondatesteachers'
         );
 
         $collection->add_database_table(
             'booking_subbooking_answers',
             [
-                'itemid' => 'privacy:metadata:booking_subbooking_answers:itemid',
-                'optionid' => 'privacy:metadata:booking_subbooking_answers:optionid',
-                'sboptionid' => 'privacy:metadata:booking_subbooking_answers:sboptionid',
-                'userid' => 'privacy:metadata:booking_subbooking_answers:userid',
-                'usermodified' => 'privacy:metadata:booking_subbooking_answers:usermodified',
-                'json' => 'privacy:metadata:booking_subbooking_answers:json',
-                'timestart' => 'privacy:metadata:booking_subbooking_answers:timestart',
-                'timeend' => 'privacy:metadata:booking_subbooking_answers:timeend',
-                'status' => 'privacy:metadata:booking_subbooking_answers:status',
-                'timecreated' => 'privacy:metadata:booking_subbooking_answers:timecreated',
-                'timemodified' => 'privacy:metadata:booking_subbooking_answers:timemodified',
+                'itemid' => 'privacy:metadata:bookingsubbookinganswers:itemid',
+                'optionid' => 'privacy:metadata:bookingsubbookinganswers:optionid',
+                'sboptionid' => 'privacy:metadata:bookingsubbookinganswers:sboptionid',
+                'userid' => 'privacy:metadata:bookingsubbookinganswers:userid',
+                'usermodified' => 'privacy:metadata:bookingsubbookinganswers:usermodified',
+                'json' => 'privacy:metadata:bookingsubbookinganswers:json',
+                'timestart' => 'privacy:metadata:bookingsubbookinganswers:timestart',
+                'timeend' => 'privacy:metadata:bookingsubbookinganswers:timeend',
+                'status' => 'privacy:metadata:bookingsubbookinganswers:status',
+                'timecreated' => 'privacy:metadata:bookingsubbookinganswers:timecreated',
+                'timemodified' => 'privacy:metadata:bookingsubbookinganswers:timemodified',
             ],
-            'privacy:metadata:booking_subbooking_answers'
+            'privacy:metadata:bookingsubbookinganswers'
         );
 
         $collection->add_database_table(
             'booking_odt_deductions',
             [
-                'optiondateid' => 'privacy:metadata:booking_odt_deductions:optiondateid',
-                'userid' => 'privacy:metadata:booking_odt_deductions:userid',
-                'reason' => 'privacy:metadata:booking_odt_deductions:reason',
-                'usermodified' => 'privacy:metadata:booking_odt_deductions:usermodified',
-                'timecreated' => 'privacy:metadata:booking_odt_deductions:timecreated',
-                'timemodified' => 'privacy:metadata:booking_odt_deductions:timemodified',
+                'optiondateid' => 'privacy:metadata:bookingodtdeductions:optiondateid',
+                'userid' => 'privacy:metadata:bookingodtdeductions:userid',
+                'reason' => 'privacy:metadata:bookingodtdeductions:reason',
+                'usermodified' => 'privacy:metadata:bookingodtdeductions:usermodified',
+                'timecreated' => 'privacy:metadata:bookingodtdeductions:timecreated',
+                'timemodified' => 'privacy:metadata:bookingodtdeductions:timemodified',
             ],
-            'privacy:metadata:booking_odt_deductions'
+            'privacy:metadata:bookingodtdeductions'
         );
 
         return $collection;
@@ -226,9 +235,10 @@ class provider implements
 
         $user = $contextlist->get_user();
 
-        list($contextsql, $contextparams) = $DB->get_in_or_equal($contextlist->get_contextids(), SQL_PARAMS_NAMED);
+        [$contextsql, $contextparams] = $DB->get_in_or_equal($contextlist->get_contextids(), SQL_PARAMS_NAMED);
 
-        $sql = "SELECT  cm.id AS cmid,
+        $sql = "SELECT  ans.id,
+                        cm.id AS cmid,
                         boo.name AS bookingname,
                         cm.course AS courseid,
                         ans.optionid AS bookedoption,
@@ -240,7 +250,9 @@ class provider implements
                         opt.text AS bookedoptiontext,
                         opt.coursestarttime AS coursestart,
                         opt.courseendtime AS courseend,
-                        rat.rate AS rating
+                        rat.rate AS rating,
+                        hist.status AS historystatus,
+                        hist.json AS historydetails
                   FROM {context} c
             INNER JOIN {course_modules} cm ON cm.id = c.instanceid AND c.contextlevel = :contextlevel
             INNER JOIN {modules} m ON m.id = cm.module AND m.name = :modname
@@ -248,6 +260,7 @@ class provider implements
             INNER JOIN {booking_answers} ans ON ans.bookingid = boo.id
             INNER JOIN {booking_options} opt ON boo.id = opt.bookingid
             LEFT JOIN {booking_ratings} rat ON opt.id = rat.optionid
+            LEFT JOIN {booking_history} hist ON ans.id = hist.answerid
                  WHERE c.id {$contextsql}
                        AND ans.userid = :userid
               ORDER BY cm.id";
@@ -267,6 +280,11 @@ class provider implements
                     $context = context_module::instance($lastcmid);
                     self::export_booking($bookingdata, $context, $user);
                 }
+                $historydata = $DB->get_records('booking_history', ['userid' => $user->id, 'answerid' => $bookinganswer->id]);
+                foreach ($historydata as $history) {
+                    $possiblehistorystatuses = booking::get_array_of_possible_booking_history_statuses();
+                    $history['status'] = $possiblehistorystatuses[$history['status']];
+                }
                 $bookingdata = [
                     'bookingname' => $bookinganswer->bookingname,
                     'timebooked' => \core_privacy\local\request\transform::datetime($bookinganswer->bookingcreated),
@@ -274,12 +292,13 @@ class provider implements
                     'waitinglist' => $bookinganswer->waitinglist,
                     'status' => $bookinganswer->status,
                     'notes' => $bookinganswer->notes,
+                    'historydata' => $historydata,
                 ];
             }
             // Important, can be more than one option. Export in one nice line.
             $bookingdata['bookedoptions'][] = $bookinganswer->bookedoptiontext . " (from " .
-                \core_privacy\local\request\transform::datetime($bookinganswer->coursestart). " to " .
-                \core_privacy\local\request\transform::datetime($bookinganswer->courseend). ") with rating " .
+                \core_privacy\local\request\transform::datetime($bookinganswer->coursestart) . " to " .
+                \core_privacy\local\request\transform::datetime($bookinganswer->courseend) . ") with rating " .
                 $bookinganswer->rating;
             $lastcmid = $bookinganswer->cmid;
         }
@@ -304,11 +323,10 @@ class provider implements
         if (!$context instanceof context_module) {
             return;
         }
-
         if ($cm = get_coursemodule_from_id('booking', $context->instanceid)) {
             // Delete all booking answers within the instance.
             $DB->delete_records('booking_answers', ['bookingid' => $cm->instance]);
-
+            $DB->delete_records('booking_history', ['bookingid' => $cm->instance]);
             // Delete all teachers within the instance.
             $DB->delete_records('booking_teachers', ['bookingid' => $cm->instance]);
 
@@ -350,6 +368,7 @@ class provider implements
                 WHERE bo.bookingid = :bookingid)';
             // Now we can delete all entries in booking_userevents within the instance.
             $DB->delete_records_select('booking_userevents', $usereventswhere, ['bookingid' => $cm->instance]);
+            $DB->delete_records('booking_history', ['bookingid' => $cm->instance]);
         }
     }
 
@@ -368,12 +387,12 @@ class provider implements
 
         $userid = $contextlist->get_user()->id;
         foreach ($contextlist->get_contexts() as $context) {
-
             if (!$context instanceof context_module) {
                 continue;
             }
             $instanceid = $DB->get_field('course_modules', 'instance', ['id' => $context->instanceid], MUST_EXIST);
             $DB->delete_records('booking_answers', ['bookingid' => $instanceid, 'userid' => $userid]);
+            $DB->delete_records('booking_history', ['bookingid' => $instanceid, 'userid' => $userid]);
             $DB->delete_records('booking_teachers', ['bookingid' => $instanceid, 'userid' => $userid]);
             // Also delete all entries for booking_optiondates_teachers in context for the user.
             teachers_handler::delete_booking_optiondates_teachers_by_bookingid($instanceid, $userid);
@@ -468,11 +487,12 @@ class provider implements
         }
 
         $userids = $userlist->get_userids();
-        list($usersql, $params) = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED);
+        [$usersql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED);
         $select = "userid $usersql";
 
         // Now delete everything related to the selected userids.
         $DB->delete_records_select('booking_answers', $select, $params);
+        $DB->delete_records_select('booking_history', $select, $params);
         $DB->delete_records_select('booking_teachers', $select, $params);
         $DB->delete_records_select('booking_optiondates_teachers', $select, $params);
         cache_helper::purge_by_event('setbackcachedteachersjournal');

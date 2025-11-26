@@ -29,10 +29,6 @@ Feature: As a teacher - configure and use booking's semesters feature.
     And the following "mod_booking > options" exist:
       | booking    | text                                         | course | description  | semester   |
       | My booking | Price formula option - Dates In timeslot     | C1     | Option deskr | nextsummer |
-    ## Unfortunately, in Moodle 4.3 TinyMCE has misbehavior which cause number of site-wide issues. So - we disable it.
-    And the following config values are set as admin:
-      | config      | value         |
-      | texteditors | atto,textarea |
     And I change viewport size to "1366x10000"
 
   @javascript
@@ -62,17 +58,16 @@ Feature: As a teacher - configure and use booking's semesters feature.
     And I press "Create date series"
     And I wait "1" seconds
     And I should see "## + 1 year ##%Y##" in the "#booking_optiondate_1" "css_element"
-    And I should see "1:00 PM - 2:00 PM" in the "#booking_optiondate_1" "css_element"
+    And I should see "1:00 PM - 2:00 PM" in the "#booking_optiondate_1" "css_element"
     And I should see "Friday" in the "#booking_optiondate_1" "css_element"
     And I should see "June" in the "#booking_optiondate_1" "css_element"
     And I should see "July" in the "#booking_optiondate_6" "css_element"
     And I press "Save"
-    And I wait until the page is ready
     Then I should see "Option - Test Semester" in the ".allbookingoptionstable_r1" "css_element"
-    And I should see "Friday, 13:00-14:00" in the ".allbookingoptionstable_r1" "css_element"
+    And I should see "Friday, 13:00 - 14:00" in the ".allbookingoptionstable_r1" "css_element"
     And I click on "Show dates" "link" in the ".allbookingoptionstable_r1" "css_element"
     And I wait "1" seconds
     And I should see "## + 1 year ##%Y##" in the ".allbookingoptionstable_r1 .showdates" "css_element"
-    And I should see "1:00 PM - 2:00 PM" in the ".allbookingoptionstable_r1 .showdates" "css_element"
+    And I should see "1:00 PM - 2:00 PM" in the ".allbookingoptionstable_r1 .showdates" "css_element"
     And I should see "June" in the ".allbookingoptionstable_r1 .showdates" "css_element"
     And I should see "July" in the ".allbookingoptionstable_r1 .showdates" "css_element"

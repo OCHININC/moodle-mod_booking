@@ -25,6 +25,7 @@
 namespace mod_booking\option;
 use Exception;
 use html_writer;
+use mod_booking\output\renderer;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -55,6 +56,13 @@ class dates_handler {
 
     /** @var int $bookingid */
     public int $bookingid = 0;
+
+    /**
+     * Pretty timestamps are stored here to avoid multiple calls.
+     *
+     * @var array
+     */
+    public static array $prettytimestamps = [];
 
     /**
      * Constructor.
@@ -119,6 +127,7 @@ class dates_handler {
 
         if ($loadexistingdates) {
             // Add already existing optiondates to form.
+            /** @var renderer $output */
             $output = $PAGE->get_renderer('mod_booking');
             $data = new \mod_booking\output\bookingoption_dates($this->optionid);
             $mform->addElement('html', '<div class="optiondates-list">');
@@ -210,38 +219,48 @@ class dates_handler {
         }
 
         $semester = new semester($semesterid);
-        $dayinfo = self::prepare_day_info($reoccurringdatestring);
 
-        // If an invalid day string was entered, we'll have an empty $dayinfo array.
-        if (empty($dayinfo)) {
-            return [];
-        }
+        $reoccurringdatestrings = self::split_and_trim_reoccurringdatestring($reoccurringdatestring);
 
-        $j = 1;
-        sscanf($dayinfo['starttime'], "%d:%d", $hours, $minutes);
-        $startseconds = ($hours * 60 * 60) + ($minutes * 60);
-        sscanf($dayinfo['endtime'], "%d:%d", $hours, $minutes);
-        $endseconds = $hours * 60 * 60 + $minutes * 60;
-        for ($i = strtotime($dayinfo['day'], $semester->startdate); $i <= $semester->enddate; $i = strtotime('+1 week', $i)) {
-            $date = new stdClass();
-            $date->starttimestamp = $i + $startseconds;
-            $date->endtimestamp = $i + $endseconds;
+        foreach ($reoccurringdatestrings as $reoccurringdatestring) {
+            $dayinfo = self::prepare_day_info($reoccurringdatestring);
 
-            // Check if the date is on a holiday and only add if it isn't.
-            if (self::is_on_a_holiday($date)) {
-                continue;
+            // If an invalid day string was entered, we'll have an empty $dayinfo array.
+            if (empty($dayinfo)) {
+                return [];
             }
 
-            $date->date = date('Y-m-d', $i);
-            $date->starttime = $dayinfo['starttime'];
-            $date->endtime = $dayinfo['endtime'];
-            $date->dateid = 'newdate-' . $j;
-            $j++;
+            $j = 1;
+            sscanf($dayinfo['starttime'], "%d:%d", $hours, $minutes);
+            $startseconds = ($hours * 60 * 60) + ($minutes * 60);
+            sscanf($dayinfo['endtime'], "%d:%d", $hours, $minutes);
+            $endseconds = $hours * 60 * 60 + $minutes * 60;
 
-            $date->string = self::prettify_optiondates_start_end($date->starttimestamp, $date->endtimestamp, current_language());
-            $datearray['dates'][] = $date;
+            for ($i = strtotime($dayinfo['day'], $semester->startdate); $i <= $semester->enddate; $i = strtotime('+1 week', $i)) {
+                $date = new stdClass();
+                $date->starttimestamp = $i + $startseconds;
+                $date->endtimestamp = $i + $endseconds;
+
+                // Check if the date is on a holiday and only add if it isn't.
+                if (self::is_on_a_holiday($date)) {
+                    continue;
+                }
+                $date->date = date('Y-m-d', $i);
+                $date->starttime = $dayinfo['starttime'];
+                $date->endtime = $dayinfo['endtime'];
+                $date->dateid = 'newdate-' . $j;
+                $j++;
+
+                $date->string = self::prettify_optiondates_start_end(
+                    $date->starttimestamp,
+                    $date->endtimestamp,
+                    current_language()
+                );
+                $datearray['dates'][] = $date;
+            }
         }
-        return $datearray;
+
+        return $datearray ?? [];
     }
 
     /**
@@ -267,11 +286,66 @@ class dates_handler {
     }
 
     /**
+     * Helper function to split a reoccurring date string into an array.
+     * @param string $reoccurringdatestring e.g. "Mo, 10:00-11:00 & Di, 12:00-13:00"
+     * @return array array of separate strings
+     */
+    public static function split_and_trim_reoccurringdatestring(string $reoccurringdatestring = ''): array {
+        $pattern = '/\r?\n/';  // Regex pattern for separators.
+        if (preg_match($pattern, $reoccurringdatestring)) {
+            // Split by the pattern and trim each part.
+            $parts = preg_split($pattern, $reoccurringdatestring);
+            return array_map('trim', $parts);
+        }
+        if (empty($reoccurringdatestring)) {
+            // If the string is empty, return an empty array.
+            return [];
+        }
+        // If no separator is found, return the trimmed input.
+        return [trim($reoccurringdatestring)];
+    }
+
+    /**
+     * Helper function to render a list of dayofweektimestrings.
+     * @param string $reoccurringdatestring full string containing one or multiple dayofweektime strings
+     * @param string $separator optional separator, default is ', '
+     * @return string rendered string
+     */
+    public static function render_dayofweektime_strings(string $reoccurringdatestring = '', string $separator = ', '): string {
+        if (empty($reoccurringdatestring)) {
+            return '';
+        }
+        $reoccurringdatestrings = self::split_and_trim_reoccurringdatestring($reoccurringdatestring);
+        if (!empty($reoccurringdatestrings)) {
+            $strings = [];
+            $localweekdays = self::get_localized_weekdays(current_language());
+            foreach ($reoccurringdatestrings as $reoccurringdatestring) {
+                $dayinfo = self::prepare_day_info($reoccurringdatestring);
+                if (isset($dayinfo['day']) && $dayinfo['starttime'] && $dayinfo['endtime']) {
+                    $strings[] = $localweekdays[$dayinfo['day']] . ', ' . $dayinfo['starttime'] . ' - ' . $dayinfo['endtime'];
+                } else if (!empty($reoccurringdatestring)) {
+                    $strings[] = $reoccurringdatestring;
+                } else {
+                    $strings[] = get_string('datenotset', 'mod_booking');
+                }
+            }
+            return implode($separator, $strings);
+        }
+        return '';
+    }
+
+    /**
      * Prepare an array containing the weekday, start time and end time.
      * @param string $reoccurringdatestring
      * @return array
      */
     public static function prepare_day_info(string $reoccurringdatestring): array {
+        // Important: If we have multiple day of weektime strings, we have to handle this before.
+        // In this case, this function needs to be called for each string separately!
+        // If it gets called with a string containing multiple days, it will only handle the first one.
+        $reoccurringdatestrings = self::split_and_trim_reoccurringdatestring($reoccurringdatestring);
+        $reoccurringdatestring = $reoccurringdatestrings[0] ?? '';
+
         $reoccurringdatestring = strtolower($reoccurringdatestring);
         $reoccurringdatestring = str_replace('-', ' ', $reoccurringdatestring);
         $reoccurringdatestring = str_replace(',', ' ', $reoccurringdatestring);
@@ -741,92 +815,86 @@ class dates_handler {
     public static function prettify_datetime(
         int $starttime,
         int $endtime = 0,
-        $lang = '',
-        $showweekdays = false,
+        string $lang = '',
+        bool $showweekdays = false,
         bool $ashtml = false
-    ) {
-
-        if (empty($lang)) {
+    ): stdClass {
+        if ($lang === '') {
             $lang = current_language();
         }
 
+        // Singleton cache for expensive calls (lives for the request).
+        static $cache = [
+            'formats' => [],
+            'dates'   => [],
+            'strings' => [],
+        ];
+
+        // Load format strings only once per language.
+        if (!isset($cache['formats'][$lang])) {
+            $cache['formats'][$lang] = [
+                'time'         => new lang_string('strftimetime', 'langconfig', null, $lang),
+                'date'         => new lang_string('strftimedate', 'langconfig', null, $lang),
+                'daydate'      => new lang_string('strftimedaydate', 'langconfig', null, $lang),
+                'datetime'     => new lang_string('strftimedatetime', 'langconfig', null, $lang),
+                'daydatetime'  => new lang_string('strftimedaydatetime', 'langconfig', null, $lang),
+            ];
+        }
+        $formats = $cache['formats'][$lang];
+
+        // Cache string lookup (like "h").
+        if (!isset($cache['strings']['h'])) {
+            $cache['strings']['h'] = get_string('h', 'mod_booking');
+        }
+        $h = $cache['strings']['h'];
+
+        // Helper closure for caching userdate results.
+        $getdate = function (int $ts, $format) use ($lang, &$cache) {
+            $key = $ts . '|' . (string)$format . '|' . $lang;
+            if (!isset($cache['dates'][$key])) {
+                $cache['dates'][$key] = userdate($ts, $format);
+            }
+            return $cache['dates'][$key];
+        };
+
         $date = new stdClass();
+        $date->starttimestamp = $starttime;
+        $date->starttime      = $getdate($starttime, $formats['time']);
+        $date->startdate      = $getdate($starttime, $showweekdays ? $formats['daydate'] : $formats['date']);
+        $date->startdatetime  = $getdate($starttime, $showweekdays ? $formats['daydatetime'] : $formats['datetime']);
 
-        // Time only.
-        $strftimetime = new lang_string('strftimetime', 'langconfig', null, $lang); // 10:30.
-
-        // Dates only.
-        $strftimedate = new lang_string('strftimedate', 'langconfig', null, $lang); // 3. February 2023.
-        $strftimedaydate = new lang_string('strftimedaydate', 'langconfig', null, $lang); // Friday, 3. February 2023".
-
-        // Times & Dates.
-        $strftimedatetime = new lang_string('strftimedatetime', 'langconfig', null, $lang); // 3. February 2023, 11:45.
-        $strftimedaydatetime = new lang_string('strftimedaydatetime', 'langconfig', null, $lang);
-        // Friday, 3. February 2023, 11:45.
-
-        $date->starttimestamp = $starttime; // Unix timestamps.
-        $date->starttime = userdate($starttime, $strftimetime); // 10:30.
-
-        if (!empty($endtime)) {
-            $date->endtimestamp = $endtime; // Unix timestamps.
-            $date->endtime = userdate($endtime, $strftimetime); // 10:30.
+        if ($endtime) {
+            $date->endtimestamp = $endtime;
+            $date->endtime      = $getdate($endtime, $formats['time']);
+            $date->enddate      = $getdate($endtime, $showweekdays ? $formats['daydate'] : $formats['date']);
+            $date->enddatetime  = $getdate($endtime, $showweekdays ? $formats['daydatetime'] : $formats['datetime']);
         }
 
+        // HTML output.
         if ($ashtml) {
-            $date->startdate = userdate($starttime, $strftimedaydate); // Friday, 3. February 2023.
-            $date->startdatetime = userdate($starttime, $strftimedaydatetime); // Friday, 3. February 2023, 11:45.
             $datespan = html_writer::span($date->startdate, 'date');
             $timespan = html_writer::span($date->starttime, 'time');
 
-            if (!empty($endtime)) {
-                $date->enddatetime = userdate($endtime, $strftimedaydatetime); // Friday, 3. February 2023, 12:45.
-                $date->enddate = userdate($endtime, $strftimedaydate); // Friday, 3. February 2023.
-                $timespan = html_writer::span($date->starttime . ' - ' . $date->endtime . get_string('h', 'mod_booking'), 'time');
+            if ($endtime) {
+                $timespan = html_writer::span($date->starttime . ' - ' . $date->endtime . $h, 'time');
                 if ($date->startdate !== $date->enddate) {
-                    $datespan = html_writer::span($date->startdate . ' - ' . $date->enddate, 'date');
+                    $datespan = html_writer::span($date->startdate . ' - ' . $date->enddate, 'date');
                 }
             }
-
             $date->htmlstring = $datespan . $timespan;
         }
-        if ($showweekdays) {
-            $date->startdate = userdate($starttime, $strftimedaydate); // Friday, 3. February 2023.
-            $date->startdatetime = userdate($starttime, $strftimedaydatetime) . get_string('h', 'mod_booking');
-            // Friday, 3. February 2023, 11:45.
-            $date->datestring = $date->startdatetime;
 
-            if (!empty($endtime)) {
-                $date->enddatetime = userdate($endtime, $strftimedaydatetime);
-                // Friday, 3. February 2023, 12:45.
-                $date->enddate = userdate($endtime, $strftimedaydate); // Friday, 3. February 2023.
-                $date->datestring .= " - ";
-                $date->datestring .= $date->startdate != $date->enddate ?
-                    $date->enddatetime . get_string('h', 'mod_booking') :
-                    // Friday, 3. February 2023, 11:45 - Saturday, 4. February 2023, 12:45.
-                    $date->endtime . get_string('h', 'mod_booking');
-                    // Friday, 3. February 2023, 11:45 - 12:45.
-            }
-        } else {
-            // Without weekdays.
-            $date->startdate = userdate($starttime, $strftimedate); // 3. February 2023.
-            $date->startdatetime = userdate($starttime, $strftimedatetime); // 3. February 2023, 11:45.
-            $date->datestring = $date->startdatetime;
-
-            if (!empty($endtime)) {
-                $date->enddatetime = userdate($endtime, $strftimedatetime);
-                $date->enddate = userdate($endtime, $strftimedate); // 3. February 2023.
-                $date->enddatetime = userdate($endtime, $strftimedatetime);
-                // Friday, 3. February 2023, 12:45.
-                $date->datestring .= " - ";
-                $date->datestring .= $date->startdate != $date->enddate ?
-                    $date->enddatetime . get_string('h', 'mod_booking') : // 3. February 2023, 11:45 - 4. February 2023, 12:45.
-                    $date->endtime . get_string('h', 'mod_booking'); // 3. February 2023, 11:45 - 12:45.
-            }
+        // Datestring.
+        $date->datestring = $date->startdatetime . ($showweekdays ? $h : '');
+        if ($endtime) {
+            $date->datestring .= " - ";
+            $date->datestring .= $date->startdate !== $date->enddate
+                ? $date->enddatetime . $h
+                : $date->endtime . $h;
         }
 
         return $date;
     }
-
 
     /**
      * This function creates timessots between two timestamps depending on the duration.

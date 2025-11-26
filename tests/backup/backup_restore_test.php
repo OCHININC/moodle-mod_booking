@@ -22,6 +22,8 @@ use restore_controller;
 use backup;
 use stdClass;
 use context_system;
+use mod_booking\bo_availability\bo_info;
+use tool_mocktesttime\time_mock;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -48,6 +50,20 @@ final class backup_restore_test extends advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest(true);
+        time_mock::init();
+        time_mock::set_mock_time(strtotime('now'));
+        singleton_service::destroy_instance();
+    }
+
+    /**
+     * Mandatory clean-up after each test.
+     */
+    public function tearDown(): void {
+        global $DB;
+
+        parent::tearDown();
+        // Mandatory clean-up.
+        singleton_service::destroy_instance();
     }
 
     /**
@@ -59,7 +75,7 @@ final class backup_restore_test extends advanced_testcase {
      * @dataProvider booking_backup_restore_settings_provider
      */
     public function test_backup_restore_bookings_with_options_quiz_into_other_course(array $bdata): void {
-        global $USER;
+        global $DB, $USER;
 
         $this->setAdminUser();
 
@@ -70,9 +86,13 @@ final class backup_restore_test extends advanced_testcase {
         $course1 = $generator->create_course(['enablecompletion' => 1]);
         $course2 = $generator->create_course(['enablecompletion' => 1]);
         $teacher = $this->getDataGenerator()->create_user(); // Booking manager.
+        $student1 = $this->getDataGenerator()->create_user();
+        $student2 = $this->getDataGenerator()->create_user();
 
         $generator->enrol_user($teacher->id, $course1->id, 'editingteacher');
         $generator->enrol_user($teacher->id, $course2->id, 'editingteacher');
+        $this->getDataGenerator()->enrol_user($student1->id, $course1->id, 'student');
+        $this->getDataGenerator()->enrol_user($student2->id, $course1->id, 'student');
 
         // Create custom booking field.
         $categorydata = new stdClass();
@@ -136,15 +156,46 @@ final class backup_restore_test extends advanced_testcase {
         $record->customfield_spt1 = 'tennis';
         $options[3] = $plugingenerator->create_option($record);
 
+        // History item1: book student1 directly into the option.
+        $settings = singleton_service::get_instance_of_booking_option_settings($options[0]->id);
+        $boinfo = new bo_info($settings);
+        $option = singleton_service::get_instance_of_booking_option($settings->cmid, $settings->id);
+        $option->user_submit_response($student1, 0, 0, 0, MOD_BOOKING_VERIFIED);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student1->id, true);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
+
+        // History item2: Add "dummy" booking_history entry manually.
+        $originalhistory = (object)[
+            'bookingid' => $bookings[0]->id,
+            'optionid' => $options[0]->id,
+            'answerid' => null,
+            'userid' => $teacher->id,
+            'status' => 0,
+            'usermodified' => $teacher->id,
+            'timecreated' => time(),
+            'json' => '{"info":"test"}',
+        ];
+        $originalhistory->id = $DB->insert_record('booking_history', $originalhistory);
+
+        // Validate booking history.
+        $oldhistory = $DB->get_records('booking_history', ['bookingid' => $bookings[0]->id]);
+        $this->assertCount(2, $oldhistory);
+
         // Step 2: Backup the first course.
         $bc = new backup_controller(
             backup::TYPE_1COURSE,
             $course1->id,
             backup::FORMAT_MOODLE,
-            backup::INTERACTIVE_NO,
+            backup::INTERACTIVE_YES,
             backup::MODE_IMPORT,
-            $teacher->id
+            $USER->id
         );
+
+        // Include users (and, consequently - booked answers) into the backup.
+        $bc->get_plan()->get_setting('users')->set_status(\backup_setting::NOT_LOCKED);
+        $bc->get_plan()->get_setting('users')->set_value(true);
+        $bc->get_plan()->get_setting('anonymize')->set_value(false);
+        $bc->finish_ui();
         $backupid = $bc->get_backupid();
         $bc->execute_plan();
         $bc->destroy();
@@ -153,11 +204,15 @@ final class backup_restore_test extends advanced_testcase {
         $rc = new restore_controller(
             $backupid,
             $course2->id,
-            backup::INTERACTIVE_NO,
+            backup::INTERACTIVE_YES,
             backup::MODE_IMPORT,
-            $teacher->id,
+            $USER->id,
             backup::TARGET_CURRENT_ADDING
         );
+        // Include users (and, consequently - booked answers) during restore.
+        $rc->get_plan()->get_setting('users')->set_status(\backup_setting::NOT_LOCKED);
+        $rc->get_plan()->get_setting('users')->set_value(true);
+        $rc->finish_ui();
         $rc->execute_precheck();
         $rc->execute_plan();
         $rc->destroy();
@@ -172,28 +227,51 @@ final class backup_restore_test extends advanced_testcase {
         $bookingobj = singleton_service::get_instance_of_booking_by_bookingid((int)$booking21->instance);
         $options2 = $bookingobj->get_all_options();
         $this->assertCount(2, $options2);
-        $option20 = array_shift($options2);
-        $this->assertEquals($options[0]->text, $option20->text);
-        $this->assertEquals($options[0]->coursestarttime_0, $option20->coursestarttime);
-        $this->assertEquals($options[0]->courseendtime_1, $option20->courseendtime);
-        $this->assertEquals($options[0]->customfield_spt1, $option20->spt1);
-        $optionsettings = singleton_service::get_instance_of_booking_option_settings($option20->id);
-        $sessions = $optionsettings->sessions;
-        $this->assertCount(2, $sessions);
-        $session1 = array_shift($sessions);
-        $this->assertEquals($options[0]->coursestarttime_0, $session1->coursestarttime);
-        $this->assertEquals($options[0]->courseendtime_0, $session1->courseendtime);
-        $session2 = array_shift($sessions);
-        $this->assertEquals($options[0]->coursestarttime_1, $session2->coursestarttime);
-        $this->assertEquals($options[0]->courseendtime_1, $session2->courseendtime);
-
-        $option21 = array_shift($options2);
-        $this->assertEquals($options[1]->text, $option21->text);
-        $this->assertEquals($options[1]->coursestarttime_0, $option21->coursestarttime);
-        $this->assertEquals($options[1]->courseendtime_0, $option21->courseendtime);
-        $this->assertEquals($options[1]->customfield_spt1, $option21->spt1);
-        $optionsettings = singleton_service::get_instance_of_booking_option_settings($option21->id);
-        $this->assertCount(1, $optionsettings->sessions);
+        foreach ($options2 as $option2) {
+            // In rare cases - order of options could be inverted.
+            if ($options[0]->text == $option2->text) {
+                $this->assertEquals($options[0]->text, $option2->text);
+                $this->assertEquals($options[0]->coursestarttime_0, $option2->coursestarttime);
+                $this->assertEquals($options[0]->courseendtime_1, $option2->courseendtime);
+                $this->assertEquals($options[0]->customfield_spt1, $option2->spt1);
+                $optionsettings = singleton_service::get_instance_of_booking_option_settings($option2->id);
+                $sessions = $optionsettings->sessions;
+                $this->assertCount(2, $sessions);
+                $session1 = array_shift($sessions);
+                $this->assertEquals($options[0]->coursestarttime_0, $session1->coursestarttime);
+                $this->assertEquals($options[0]->courseendtime_0, $session1->courseendtime);
+                $session2 = array_shift($sessions);
+                $this->assertEquals($options[0]->coursestarttime_1, $session2->coursestarttime);
+                $this->assertEquals($options[0]->courseendtime_1, $session2->courseendtime);
+                // Verify answers for the restored option.
+                $option20answers = singleton_service::get_instance_of_booking_answers($optionsettings);
+                $option20bookinganswers = $option20answers->get_answers();
+                $this->assertCount(1, $option20bookinganswers);
+                // Verify history items for the restored option.
+                $newhistory = $DB->get_records('booking_history', ['bookingid' => $booking21->instance]);
+                $this->assertCount(2, $newhistory);
+                $historyitem = array_shift($newhistory);
+                $this->assertEquals($historyitem->userid, $student1->id);
+                $this->assertEquals($historyitem->optionid, $option2->id);
+                $this->assertEquals($historyitem->bookingid, $booking21->instance);
+                $this->assertEquals($historyitem->status, 0);
+                $this->assertEquals($historyitem->json, '{"pricecategory":"default"}');
+                $historyitem = array_shift($newhistory);
+                $this->assertEquals($historyitem->userid, $teacher->id);
+                $this->assertEquals($historyitem->optionid, $option2->id);
+                $this->assertEquals($historyitem->bookingid, $booking21->instance);
+                $this->assertEquals($historyitem->status, 0);
+                $this->assertEquals($historyitem->answerid, 0);
+                $this->assertEquals($historyitem->json, $originalhistory->json);
+            } else {
+                $this->assertEquals($options[1]->text, $option2->text);
+                $this->assertEquals($options[1]->coursestarttime_0, $option2->coursestarttime);
+                $this->assertEquals($options[1]->courseendtime_0, $option2->courseendtime);
+                $this->assertEquals($options[1]->customfield_spt1, $option2->spt1);
+                $optionsettings = singleton_service::get_instance_of_booking_option_settings($option2->id);
+                $this->assertCount(1, $optionsettings->sessions);
+            }
+        }
 
         // Validabe 2nd booking and its options.
         $booking22 = array_shift($bookings2);
@@ -201,28 +279,30 @@ final class backup_restore_test extends advanced_testcase {
         $bookingobj = singleton_service::get_instance_of_booking_by_bookingid((int)$booking22->instance);
         $options2 = $bookingobj->get_all_options();
         $this->assertCount(2, $options2);
-        $option22 = array_shift($options2);
-        $this->assertEquals($options[2]->text, $option22->text);
-        $this->assertEquals($options[2]->coursestarttime_0, $option22->coursestarttime);
-        $this->assertEquals($options[2]->courseendtime_1, $option22->courseendtime);
-        $this->assertEquals($options[2]->customfield_spt1, $option22->spt1);
-        $optionsettings = singleton_service::get_instance_of_booking_option_settings($option22->id);
-        $sessions = $optionsettings->sessions;
-        $this->assertCount(2, $sessions);
-        $session1 = array_shift($sessions);
-        $this->assertEquals($options[2]->coursestarttime_0, $session1->coursestarttime);
-        $this->assertEquals($options[2]->courseendtime_0, $session1->courseendtime);
-        $session2 = array_shift($sessions);
-        $this->assertEquals($options[2]->coursestarttime_1, $session2->coursestarttime);
-        $this->assertEquals($options[2]->courseendtime_1, $session2->courseendtime);
-
-        $option23 = array_shift($options2);
-        $this->assertEquals($options[3]->text, $option23->text);
-        $this->assertEquals($options[3]->coursestarttime_0, $option23->coursestarttime);
-        $this->assertEquals($options[3]->courseendtime_0, $option23->courseendtime);
-        $this->assertEquals($options[3]->customfield_spt1, $option23->spt1);
-        $optionsettings = singleton_service::get_instance_of_booking_option_settings($option23->id);
-        $this->assertCount(1, $optionsettings->sessions);
+        foreach ($options2 as $option2) {
+            // In rare cases - order of options could be inverted.
+            if ($options[2]->text == $option2->text) {
+                $this->assertEquals($options[2]->coursestarttime_0, $option2->coursestarttime);
+                $this->assertEquals($options[2]->courseendtime_1, $option2->courseendtime);
+                $this->assertEquals($options[2]->customfield_spt1, $option2->spt1);
+                $optionsettings = singleton_service::get_instance_of_booking_option_settings($option2->id);
+                $sessions = $optionsettings->sessions;
+                $this->assertCount(2, $sessions);
+                $session1 = array_shift($sessions);
+                $this->assertEquals($options[2]->coursestarttime_0, $session1->coursestarttime);
+                $this->assertEquals($options[2]->courseendtime_0, $session1->courseendtime);
+                $session2 = array_shift($sessions);
+                $this->assertEquals($options[2]->coursestarttime_1, $session2->coursestarttime);
+                $this->assertEquals($options[2]->courseendtime_1, $session2->courseendtime);
+            } else {
+                $this->assertEquals($options[3]->text, $option2->text);
+                $this->assertEquals($options[3]->coursestarttime_0, $option2->coursestarttime);
+                $this->assertEquals($options[3]->courseendtime_0, $option2->courseendtime);
+                $this->assertEquals($options[3]->customfield_spt1, $option2->spt1);
+                $optionsettings = singleton_service::get_instance_of_booking_option_settings($option2->id);
+                $this->assertCount(1, $optionsettings->sessions);
+            }
+        }
 
         singleton_service::destroy_instance();
     }

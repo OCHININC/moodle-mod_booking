@@ -44,7 +44,6 @@ global $CFG;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class send_confirmation_mails extends \core\task\adhoc_task {
-
     /**
      * Data for sending mail
      *
@@ -62,17 +61,17 @@ class send_confirmation_mails extends \core\task\adhoc_task {
     public function execute() {
         global $CFG, $DB;
 
-        if (empty(get_config('booking', 'uselegacymailtemplates'))) {
-            mtrace("Legacy mails are turned off, this task should be deactivated.");
+        if (!get_config('booking', 'uselegacymailtemplates')) {
+            mtrace("Legacy mails are turned off, task send_confirmation_mails is skipped.");
             return;
         }
 
         $taskdata = $this->get_custom_data();
-
-        mtrace('send_confirmation_mails task started');
+        if (!defined('PHPUNIT_TEST')) {
+            mtrace('send_confirmation_mails task started');
+        }
 
         if ($taskdata != null) {
-
             // If no messagetext has been defined, we do not send an e-mail.
             $trimmedmessage = strip_tags($taskdata->messagehtml);
             $trimmedmessage = str_replace('&nbsp;', '', $trimmedmessage);
@@ -86,13 +85,18 @@ class send_confirmation_mails extends \core\task\adhoc_task {
                         when recipient mail address is not found. */
                         try {
                             // NOTE: email_to_user does not support multiple attachments.
-                            if (!email_to_user($taskdata->userto, $taskdata->userfrom,
-                                $taskdata->subject, $taskdata->messagetext, $taskdata->messagehtml,
-                                $taskdata->attachment->{'booking.ics'} ?? '',
-                                empty($taskdata->attachment->{'booking.ics'}) ? '' : 'booking.ics')) {
-
+                            if (
+                                !email_to_user(
+                                    $taskdata->userto,
+                                    $taskdata->userfrom,
+                                    $taskdata->subject,
+                                    $taskdata->messagetext,
+                                    $taskdata->messagehtml,
+                                    $taskdata->attachment->{'booking.ics'} ?? '',
+                                    empty($taskdata->attachment->{'booking.ics'}) ? '' : 'booking.ics'
+                                )
+                            ) {
                                 mtrace('Confirmation could not be sent.');
-
                             } else {
                                 // After sending we can delete the attachment.
                                 if (!empty($taskdata->attachment)) {
@@ -126,16 +130,24 @@ class send_confirmation_mails extends \core\task\adhoc_task {
                         }
                     }
                 } else {
-                    mtrace('send_confirmation_mails: e-mail with subject "' . $taskdata->subject . '"' .
-                    ' was not sent because $taskdata->userto was missing.');
+                    if (!defined('PHPUNIT_TEST')) {
+                        mtrace('send_confirmation_mails: e-mail with subject "' . $taskdata->subject . '"' .
+                        ' was not sent because $taskdata->userto was missing.');
+                    }
                 }
             } else {
-                mtrace('send_confirmation_mails: e-mail with subject "' . $taskdata->subject . '"' .
-                    ' was not sent because message template is set to "0" (turned off).');
+                if (!defined('PHPUNIT_TEST')) {
+                    mtrace('send_confirmation_mails: e-mail with subject "' . $taskdata->subject . '"' .
+                        ' was not sent because message template is set to "0" (turned off).');
+                }
             }
         } else {
-            mtrace('Confirmation email was not sent due to lack of custom message data');
+            if (!defined('PHPUNIT_TEST')) {
+                mtrace('Confirmation email was not sent due to lack of custom message data');
+            }
         }
-        mtrace('send_confirmation_mails task finished');
+        if (!defined('PHPUNIT_TEST')) {
+            mtrace('send_confirmation_mails task finished');
+        }
     }
 }

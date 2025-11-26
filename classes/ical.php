@@ -41,7 +41,6 @@ const MOD_BOOKING_DESCRIPTION_ICAL = 3;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class ical {
-
     /**
      * $datesareset
      *
@@ -155,6 +154,13 @@ class ical {
     protected $role = 'REQ-PARTICIPANT';
 
     /**
+     * $partstat
+     *
+     * @var string
+     */
+    protected $partstat = 'NEEDS-ACTION';
+
+    /**
      * $userfullname
      *
      * @var string
@@ -182,17 +188,22 @@ class ical {
      * @param object $option the option that is being booked
      * @param object $user the user the booking is for
      * @param object $fromuser
-     * @param bool $updated if set to true, this will create an update ical (METHOD: REQUEST, SEQUENCE: 1)
+     * @param bool $updated if set to true, this will create an update ical
      */
     public function __construct($booking, $option, $user, $fromuser, $updated = false) {
         global $DB, $CFG;
+
+        $settings = singleton_service::get_instance_of_booking_option_settings($option->id);
 
         $this->booking = $booking;
         $this->option = $option;
         $this->fromuser = $fromuser;
         $this->updated = $updated;
-        $this->times = $DB->get_records('booking_optiondates', ['optionid' => $option->id],
-                'coursestarttime ASC');
+        $this->times = $DB->get_records(
+            'booking_optiondates',
+            ['optionid' => $option->id],
+            'coursestarttime ASC'
+        );
         // Check if start and end dates exist.
         $coursedates = ($this->option->coursestarttime && $this->option->courseendtime);
         $sessiontimes = !empty($this->times);
@@ -213,11 +224,10 @@ class ical {
         if (($coursedates || $sessiontimes)) {
             $this->datesareset = true;
             $this->user = $DB->get_record('user', ['id' => $user->id]);
-            // Date that this representation of the calendar information was created -
-            // See http://www.kanzaki.com/docs/ical/dtstamp.html.
-            $this->dtstamp = $this->generate_timestamp($this->option->timemodified);
-            $this->summary = $this->escape($this->booking->name . " - " . $this->option->text);
-            $this->description = $this->escape($this->option->text, true);
+            $now = time();
+            $this->dtstamp = $this->generate_timestamp($now);
+            $this->summary = $this->escape($settings->get_title_with_prefix());
+            $this->description = $this->escape($settings->description ?? '', true);
             $urlbits = parse_url($CFG->wwwroot);
             $this->host = $urlbits['host'];
             $this->userfullname = \fullname($this->user);
@@ -244,6 +254,7 @@ class ical {
 
         if ($cancel) {
             $this->role = 'NON-PARTICIPANT';
+            $this->partstat = 'DECLINED';
             $this->status = "\nSTATUS:CANCELLED";
         }
 
@@ -253,7 +264,7 @@ class ical {
         } else if ($this->updated) {
             $icalmethod = 'REQUEST';
         } else {
-            $icalmethod = 'PUBLISH';
+            $icalmethod = 'REQUEST';
         }
 
         // This is where we attach the iCal.
@@ -339,8 +350,31 @@ class ical {
         }
 
         // Make sure we have not tags in full description.
-        $fulldescription = rtrim(strip_tags(preg_replace( "/<br>|<\/p>/", "\n", $fulldescription)));
-        $fulldescription = str_replace("\n", "\\n", $fulldescription );
+        $fulldescriptionhtml = $fulldescription;
+        // Remove CR and CRLF from description as the description must be on one line.
+        $fulldescriptionhtml = str_replace(["\r\n", "\n", "\r"], ' ', $fulldescriptionhtml);
+
+        // Check for a url and render it as a nice link.
+        // Regular Expression Pattern for a basic URL.
+        $pattern = '/\b(?:https?:\/\/)[a-zA-Z0-9\.\-]+(?:\.[a-zA-Z]{2,})(?:\/\S*)?/';
+        // Array to hold the matched URLs.
+        $matches = [];
+        // Perform the pattern match.
+        preg_match_all($pattern, $fulldescriptionhtml, $matches);
+
+        foreach ($matches[0] as $url) {
+            $fulldescriptionhtml = str_replace($url, '<a href="' . $url . '">Link</a>', $fulldescriptionhtml);
+        }
+        // Limit line length to 75 characters.
+        $fulldescriptionhtml = $this->fold_html_line($fulldescriptionhtml);
+
+        $fulldescription = rtrim(strip_tags(preg_replace("/<br>|<\/p>/", "\n", $fulldescription)));
+        $fulldescription = str_replace("\n", "\\n", $fulldescription);
+
+        // Remove CR and CRLF from description as the description must be on one line to work with ical.
+        $fulldescription = str_replace(["\r\n", "\n", "\r"], ' ', $fulldescription);
+        // Limit line length to 75 characters.
+        $fulldescription = $this->fold_line($fulldescription);
 
         // Make sure that we fall back onto some reasonable no-reply address.
         $noreplyaddressdefault = 'noreply@' . get_host_from_url($CFG->wwwroot);
@@ -348,40 +382,59 @@ class ical {
 
         // If no bookingmanager was set, we fall back to the no-reply address.
         $fromuseremail = empty($this->fromuser->email) ? $noreplyaddress : $this->fromuser->email;
+        if (!empty($this->fromuser->firstname) || !empty($this->fromuser->lastname)) {
+            $fromusername = "{$this->fromuser->firstname} {$this->fromuser->lastname}";
+        } else {
+            $fromusername = "{$CFG->wwwroot}";
+        }
+
+        // Fold the attendee line if it is more than 75 characters long.
+        $attendee = "ATTENDEE;CUTYPE=INDIVIDUAL;ROLE={$this->role};PARTSTAT={$this->partstat};RSVP=TRUE;" .
+                "CN={$this->userfullname};LANGUAGE=en:MAILTO:{$this->user->email}";
+        // The fold_line function keeps the ATTENDEE line valid by adding a space at the start of the next line
+        // whenever the line breaks.
+        $attendee = $this->fold_line($attendee);
 
         $veventparts = [
             "BEGIN:VEVENT",
             "CLASS:PUBLIC",
-            "DESCRIPTION:{$fulldescription}",
+            "DESCRIPTION:",
+            "{$fulldescription}", // Put the description content in the next line.
+            "X-ALT-DESC;FMTTYPE=text/html:",
+            "{$fulldescriptionhtml}",
             "DTEND:{$dtend}",
             "DTSTAMP:{$this->dtstamp}",
             "DTSTART:{$dtstart}",
-            "LOCATION:{$this->location}",
             "PRIORITY:5",
-            // phpcs:ignore moodle.Commenting.InlineComment.NotCapital,Squiz.PHP.CommentedOutCode.Found
-            // "SEQUENCE:0",
             "SUMMARY:{$this->summary}",
             "TRANSP:OPAQUE{$this->status}",
-            "ORGANIZER;CN={$fromuseremail}:MAILTO:{$fromuseremail}",
-            "ATTENDEE;CUTYPE=INDIVIDUAL;ROLE={$this->role};PARTSTAT=NEEDS-ACTION;RSVP=false;" .
-                "CN={$this->userfullname};LANGUAGE=en:MAILTO:{$this->user->email}",
+            "ORGANIZER;CN={$fromusername}:MAILTO:{$fromuseremail}",
+            "{$attendee}",
             "UID:{$uid}",
         ];
 
-        // If the event has been updated then add SEQUENCE:1 before END:VEVENT.
+        if (!empty($this->location)) {
+            $veventparts[] = "LOCATION:{$this->location}";
+        }
+
+        // If the event has been updated then add the sequence value before END:VEVENT.
         if ($this->updated) {
             if (!$data = $DB->get_record('booking_icalsequence', ['userid' => $this->user->id, 'optionid' => $this->option->id])) {
                 $data = new \stdClass();
                 $data->userid = $this->user->id;
                 $data->optionid = $this->option->id;
-                $data->sequencevalue = 1;
+                $data->sequencevalue = 2;
                 $DB->insert_record('booking_icalsequence', $data);
+                $sequencevalue = $data->sequencevalue;
             } else {
                 ++$data->sequencevalue;
                 $DB->update_record('booking_icalsequence', $data);
+                $sequencevalue = $data->sequencevalue;
             }
-            array_push($veventparts, "SEQUENCE:$data->sequencevalue");
+        } else {
+            $sequencevalue = 1;
         }
+        array_push($veventparts, "SEQUENCE:$sequencevalue");
         array_push($veventparts, "END:VEVENT");
 
         $vevent = implode("\r\n", $veventparts);
@@ -430,5 +483,102 @@ class ical {
         $text = wordwrap($text, 75, "\n ", true);
 
         return $text;
+    }
+
+    /**
+     * Fold a single iCalendar content line to <=75 octets using RFC 5545 folding.
+     * Preserves UTF-8 characters (does not split mid-char) and adds CRLF + space.
+     * @param string $line
+     * @param int $limit
+     * @return string
+     */
+    public function fold_line(string $line, int $limit = 75): string {
+        $out = '';
+        $bytes = 0;
+        $chunk = '';
+
+        // Iterate by Unicode chars but track byte length.
+        $len = mb_strlen($line, 'UTF-8');
+        for ($i = 0; $i < $len; $i++) {
+            $ch = mb_substr($line, $i, 1, 'UTF-8');
+            $chbytes = strlen($ch); // Bytes for this char in UTF-8.
+
+            if ($bytes + $chbytes >= $limit) {
+                // Emit current chunk, then start a new folded line.
+                $out .= $chunk . "\r\n" . ' ';
+                $chunk = $ch;
+                $bytes = $chbytes + 1; // Account for the leading space on next physical line.
+            } else {
+                $chunk .= $ch;
+                $bytes += $chbytes;
+            }
+        }
+        return $out . $chunk;
+    }
+
+    /**
+     * Fold a long iCalendar HTML line (X-ALT-DESC) without breaking tags or URLs.
+     *
+     * - Ensures each physical line is <=75 octets (including the leading space on
+     *   continuation lines).
+     * - Prefers folding at spaces or after '>' (end of tag).
+     * - Avoids breaking inside "http://", "https://".
+     * - Uses CRLF line endings.
+     *
+     * @param string $line
+     * @param int $limit
+     * @return string
+     */
+    public function fold_html_line(string $line, int $limit = 75): string {
+        $encoding = 'UTF-8';
+        $out = '';
+        $offset = 0;
+        $first = true;
+        $total = strlen($line);
+
+        while ($offset < $total) {
+            $maxcontent = $first ? $limit : $limit - 1; // Continuation reserves 1 byte for space.
+            if (($total - $offset) <= $maxcontent) {
+                // Last chunk fits.
+                $chunk = substr($line, $offset);
+                $offset = $total;
+            } else {
+                // Propose a chunk.
+                $chunk = mb_strcut($line, $offset, $maxcontent, $encoding);
+
+                // Look for safe break position inside chunk.
+                $safepos = max(
+                    strrpos($chunk, ' '), // Last space.
+                    strrpos($chunk, '>') // Or after tag.
+                );
+
+                // Avoid cutting inside URLs.
+                $httppos = strrpos($chunk, 'http');
+                if ($httppos !== false && $httppos > $safepos) {
+                    $safepos = strrpos(substr($chunk, 0, $httppos), ' ');
+                }
+
+                if ($safepos !== false && $safepos > 0) {
+                    $chunk = substr($chunk, 0, $safepos + 1); // Keep delimiter.
+                }
+                $offset += strlen($chunk);
+            }
+
+            if ($first) {
+                $out .= $chunk;
+                $first = false;
+            } else {
+                $out .= "\r\n" . ' ' . $chunk;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Returns the dates records from the optiondates table.
+     * @return array
+     */
+    public function get_times(): array {
+        return $this->times;
     }
 }

@@ -29,7 +29,7 @@ namespace mod_booking\bo_availability\conditions;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
 use mod_booking\booking_option_settings;
-use mod_booking\singleton_service;
+use moodle_url;
 use MoodleQuickForm;
 
 defined('MOODLE_INTERNAL') || die();
@@ -44,7 +44,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class isloggedin implements bo_condition {
-
     /** @var int $id Standard Conditions have hardcoded ids. */
     public $id = MOD_BOOKING_BO_COND_ISLOGGEDIN;
 
@@ -108,10 +107,10 @@ class isloggedin implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -156,7 +155,7 @@ class isloggedin implements bo_condition {
 
         $isavailable = $this->is_available($settings, $userid, $not);
 
-        $description = $this->get_description_string($isavailable, $full, $settings);
+        $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_NONE, MOD_BOOKING_BO_BUTTON_JUSTMYALERT];
     }
@@ -205,10 +204,37 @@ class isloggedin implements bo_condition {
         bool $not = false,
         bool $fullwidth = true
     ): array {
+        global $SESSION;
+        $courseid = $settings->courseid;
 
         $label = $this->get_description_string(false, $full, $settings);
         $style = 'btn btn-' . get_config('booking', 'loginbuttonforbookingoptionscoloroptions') ?? 'btn btn-warning';
 
+        $returnurl = "";
+        if (get_config('booking', 'showbookingdetailstoall')) {
+            $returnurl = new moodle_url(
+                '/mod/booking/optionview.php',
+                [
+                  'optionid' => $settings->id,
+                 'cmid' => $settings->cmid,
+                ]
+            );
+        }
+
+        if (get_config('booking', 'redirectonlogintocourse') && !empty($courseid)) {
+            $returnurl = new moodle_url(
+                '/mod/booking/optionview.php',
+                [
+                    'optionid' => $settings->id,
+                    'cmid' => $settings->cmid,
+                    'redirecttocourse' => 1,
+                ]
+            );
+        }
+        $url = new moodle_url('/login/index.php');
+        if (!empty($returnurl)) {
+                $SESSION->wantsurl = $returnurl->out(false);
+        }
         $button = bo_info::render_button(
             $settings,
             $userid,
@@ -220,7 +246,7 @@ class isloggedin implements bo_condition {
             'option',
             true,
             '',
-            "/login/index.php",
+            $url,
             'fa-play'
         );
 

@@ -17,10 +17,14 @@
 namespace mod_booking\signinsheet;
 
 use mod_booking\booking_option_settings;
+use mod_booking\option\fields\sharedplaces;
 use mod_booking\singleton_service;
-use Throwable;
+use Exception;
 use user_picture;
+use stdClass;
 
+defined('MOODLE_INTERNAL') || die();
+require_once($CFG->dirroot . '/local/wunderbyte_table/lib/phpwordinit.php');
 /**
  * Class for generating the signin sheet as PDF using TCPDF
  *
@@ -135,7 +139,7 @@ class signinsheet_generator {
     /**
      * signinsheet logo fetched from booking module setting
      * (admin level) as string
-     * @var string
+     * @var \stored_file
      */
     public $signinsheetlogo = '';
 
@@ -162,6 +166,12 @@ class signinsheet_generator {
      * @var array
      */
     public $extracols = [];
+
+    /**
+     * extra columns to display
+     * @var string
+     */
+    public $saveasformat = '';
 
     /**
      *
@@ -233,7 +243,7 @@ class signinsheet_generator {
      * @param ?\mod_booking\booking_option $bookingoption
      *
      */
-    public function __construct(\stdClass $pdfoptions, ?\mod_booking\booking_option $bookingoption = null) {
+    public function __construct(stdClass $pdfoptions, ?\mod_booking\booking_option $bookingoption = null) {
 
         global $DB;
 
@@ -245,6 +255,7 @@ class signinsheet_generator {
         $this->extrasessioncols = $pdfoptions->extrasessioncols;
         $this->addemptyrows = $pdfoptions->addemptyrows;
         $this->includeteachers = $pdfoptions->includeteachers;
+        $this->saveasformat = $pdfoptions->saveasformat ?? '';
 
         if ($this->orientation == "P") {
             $this->colwidth = 210;
@@ -293,20 +304,54 @@ class signinsheet_generator {
     }
 
     /**
-     * Generate PDF and prepare it for download
+     * Returns the user's full name in the format "Lastname, Firstname",
+     * handling empty values gracefully.
+     *
+     * @param stdClass $user The user object with optional firstname and lastname properties.
+     * @return string The formatted full name.
      */
-    public function download_signinsheet() {
-        global $DB, $PAGE;
-        $groupparams = [];
-        $addsqlwhere = '';
+    private function get_user_fullname($user): string {
+        if (empty($user->lastname) && empty($user->firstname)) {
+            return '';
+        } else if (empty($user->lastname)) {
+            return $user->firstname;
+        } else if (empty($user->firstname)) {
+            return $user->lastname;
+        } else {
+            return "{$user->lastname}, {$user->firstname}";
+        }
+    }
 
+
+    /**
+     * Prepares HTML content for the signinsheet based on users and settings.
+     *
+     * This function takes the configured HTML template, processes it to include user data,
+     * session columns, and other customizations. It handles:
+     * - Extracting and applying user templates from the configuration
+     * - Adding extra session columns with rotated headers
+     * - Generating individual user rows with their data
+     * - Adding logos and titles
+     * - Preparing the final output in the specified format (PDF/Word)
+     *
+     * @return void
+     */
+    public function prepare_html() {
+        global $DB, $PAGE;
+        $addsqlwhere = '';
+        $groupparams = [];
         $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
 
-        if (groups_get_activity_groupmode($this->bookingoption->booking->cm) == SEPARATEGROUPS &&
-                 !has_capability('moodle/site:accessallgroups',
-                        \context_course::instance($this->bookingoption->booking->course->id))) {
-            list($groupsql, $groupparams) = \mod_booking\booking::booking_get_groupmembers_sql(
-                    $this->bookingoption->booking->course->id);
+        if (
+            groups_get_activity_groupmode($this->bookingoption->booking->cm) == SEPARATEGROUPS
+            && !has_capability(
+                'moodle/site:accessallgroups',
+                \context_course::instance($this->bookingoption->booking->course->id)
+            )
+        ) {
+            [$groupsql, $groupparams] = \mod_booking\booking::booking_get_groupmembers_sql(
+                $this->bookingoption->booking->course->id
+            );
             $addsqlwhere .= " AND u.id IN ($groupsql)";
         }
 
@@ -316,6 +361,8 @@ class signinsheet_generator {
             'signinextracols2',
             'signinextracols3',
             'fullname',
+            'firstname',
+            'lastname',
             'signature',
             'rownumber',
             'role',
@@ -337,7 +384,7 @@ class signinsheet_generator {
             $userfields = '';
         }
 
-        list($select1, $from1, $filter1, $params1) = booking_option_settings::return_sql_for_custom_profile_field($userinfofields);
+        [$select1, $from1, $filter1, $params1] = booking_option_settings::return_sql_for_custom_profile_field($userinfofields);
 
         $sql =
         "SELECT u.id, ba.timecreated as bookingtime, ba.places, " . $mainuserfields . $userfields . $select1 .
@@ -348,13 +395,365 @@ class signinsheet_generator {
                  $addsqlwhere . "ORDER BY u.{$this->orderby} ASC";
 
         $users = $DB->get_records_sql(
-                $sql,
-                array_merge($groupparams,
-                                ['optionid' => $this->optionid]));
+            $sql,
+            array_merge(
+                $groupparams,
+                ['optionid' => $this->optionid]
+            )
+        );
+
+        if ($this->includeteachers) {
+            $mainuserfields = \core_user\fields::for_name()->get_sql('u')->selects;
+            $mainuserfields = trim($mainuserfields, ', ');
+
+            $teachers = $DB->get_records_sql(
+                'SELECT u.id, ' . $mainuserfields . $userfields .
+                '
+            FROM {booking_teachers} bt
+            LEFT JOIN {user} u ON u.id = bt.userid
+            WHERE bt.optionid = :optionid ' .
+                $addsqlwhere . "ORDER BY u.{$this->orderby} ASC",
+                array_merge(
+                    $groupparams,
+                    ['optionid' => $this->optionid]
+                )
+            );
+            foreach ($teachers as $teacher) {
+                $teacher->isteacher = true;
+                array_push($users, $teacher);
+            }
+        }
+
+        // Retrieve the configuration HTML.
+        $confightml = get_config('booking', 'signinsheethtml');
+        if (empty(trim(strip_tags($confightml)))) {
+            $confightml = $this->get_default_signinsheet_html();
+        }
+
+        // Extract user template from the configuration HTML.
+        preg_match('/\[\[users\]\](.*?)\[\[\/users\]\]/s', $confightml, $matches);
+        $usertemplate = isset($matches[1]) ? $matches[1] : '';
+
+        if ($this->pdfsessions == -1) {
+                $dates = get_string('signinsheetdatetofillin', 'booking') . ": ________________________";
+        }
+
+        $extrasessioncols = $this->get_extra_session_columns();
+        if (!empty($extrasessioncols)) {
+            $this->allfields = array_unique(array_merge($this->allfields, $extrasessioncols));
+        }
+
+        // Session handling logic.
+        if ($this->pdfsessions == 0) {
+            // Logic to integrate based on existing session data.
+            $val = [];
+            foreach ($this->sessions as $session) {
+                $val[] = userdate($session->coursestarttime) . " - " . userdate($session->courseendtime);
+            }
+            $dates = implode(", ", $val);
+        }
+
+        // Generate session header columns with vertical text.
+        $sessionheader = '';
+        foreach ($extrasessioncols as $sessiondate) {
+            $sessionheader .= '<th class="vertical-text">' . $sessiondate . '</th>';
+        }
+
+        if (count($extrasessioncols) > 0) {
+            // Target only the header row inside the table with class "signaturetable".
+            $confightml = preg_replace(
+                '/(<table[^>]*class="signaturetable"[^>]*>.*?<tr[^>]*>.*?)(<\/tr>)/s',
+                '$1' . $sessionheader . '$2',
+                $confightml
+            );
+        }
+
+        // Generate user rows with session columns.
+        $userrows = '';
+        foreach ($users as $user) {
+            $row = $usertemplate;
+            $replacements = [
+                '[[fullname]]' => $this->get_user_fullname($user),
+                '[[firstname]]' => $user->firstname ?? '',
+                '[[lastname]]' => $user->lastname ?? '',
+                '[[email]]' => $user->email ?? '',
+                '[[signature]]' => $user->signature ?? '',
+                '[[institution]]' => $user->institution ?? '',
+                '[[description]]' => format_text_email($user->description ?? '', FORMAT_HTML),
+                '[[city]]' => $user->city ?? '',
+                '[[country]]' => $user->country ?? '',
+                '[[idnumber]]' => $user->idnumber ?? '',
+                '[[phone1]]' => $user->phone1 ?? '',
+                '[[department]]' => $user->department ?? '',
+                '[[address]]' => $user->address ?? '',
+                '[[places]]' => $user->places ?? '',
+            ];
+
+            // Get all custom user profile fields and add them as placeholders.
+            $customuserfields = $DB->get_records('user_info_field');
+            foreach ($customuserfields as $customuserfield) {
+                $fieldtype = $customuserfield->datatype;
+                $shortname = $customuserfield->shortname;
+                if ($fieldtype == 'datetime') {
+                    $cleanvalue = $user->$shortname ?? 0;
+                    $value = $cleanvalue != 0 ? userdate($user->$shortname, get_string('strftimedate', 'langconfig')) : '';
+                } else {
+                    $value = $user->$shortname ?? '';
+                }
+                $replacements['[[' . $shortname . ']]'] = $value ?? '';
+            }
+
+            $userobj = singleton_service::get_instance_of_user($user->id);
+            $userpic = new user_picture($userobj);
+            if (empty($userpic)) {
+                $replacements['[[userpic]]'] = '';
+            } else {
+                $userpictureurl = $userpic->get_url($PAGE);
+                $out = $userpictureurl->out();
+                $replacements['[[userpic]]'] = '<img src="' . $out . '"/>';
+            }
+
+            $sessioncols = str_repeat('<td></td>', count($extrasessioncols));
+            foreach ($replacements as $placeholder => $realvalue) {
+                $row = str_replace($placeholder, $realvalue, $row);
+            }
+            $row = str_replace('</tr>', $sessioncols . '</tr>', $row);
+            $userrows .= $row;
+        }
+
+        // Replace the [[users]] section with generated user rows.
+        $htmloutput = preg_replace('/\[\[users\]\].*?\[\[\/users\]\]/s', $userrows, $confightml);
+
+        // Determine the header title.
+        if ($this->title == 2) {
+            $headertitle = format_string($settings->get_title_with_prefix());
+        } else if ($this->title == 1) {
+            $headertitle = format_string($this->bookingoption->booking->settings->name) . ': ' .
+                format_string($settings->get_title_with_prefix());
+        } else {
+            $headertitle = format_string($this->bookingoption->booking->settings->name, null);
+        }
+
+        $location = '';
+        if (class_exists('local_entities\entitiesrelation_handler') && !empty($settings->entity)) {
+            if (!empty($settings->entity['parentname'])) {
+                $location = $settings->entity['parentname'] . " (" . $settings->entity['name'] . ")";
+            } else {
+                $location = $settings->entity['name'] ?? $settings->location ?? '';
+            }
+        } else if (!empty($settings->location)) {
+            $location = $settings->location;
+        }
+
+        $dayofweektime = !empty($settings->dayofweektime) ? $settings->dayofweektime : '';
+        $teachers = !empty($this->teachers) ? implode(', ', $this->teachers) : '';
+        $dates = $this->pdfsessions != -1 && $this->pdfsessions != -2 ? $this->sessionsstring : '';
+
+        $htmloutput = str_replace('[[location]]', $location, $htmloutput);
+        $htmloutput = str_replace('[[dayofweektime]]', $dayofweektime, $htmloutput);
+        $htmloutput = str_replace('[[teachers]]', $teachers, $htmloutput);
+        $htmloutput = str_replace('[[dates]]', $dates, $htmloutput);
+        // Add the logo URL to HTML.
+        if ($this->get_signinsheet_logo()) {
+            $url = \moodle_url::make_pluginfile_url(
+                $this->signinsheetlogo->get_contextid(),
+                $this->signinsheetlogo->get_component(),
+                $this->signinsheetlogo->get_filearea(),
+                $this->signinsheetlogo->get_itemid(),
+                $this->signinsheetlogo->get_filepath(),
+                $this->signinsheetlogo->get_filename()
+            );
+            $src = $url->out();
+            $htmloutput = str_replace('[[logourl]]', $src, $htmloutput);
+        }
+
+        // Replace table name placeholder.
+        $htmloutput = str_replace('[[tablename]]', $headertitle, $htmloutput);
+
+        // Output the document in the specified format.
+        switch ($this->saveasformat) {
+            case 'pdf':
+                $this->download_pdf_from_html($htmloutput, $settings);
+                break;
+            case 'word':
+                $this->download_word_from_html($htmloutput, $settings);
+                break;
+            default:
+                $this->download_pdf_from_html($htmloutput, $settings);
+                break;
+        }
+    }
+
+
+
+    /**
+     * Converts HTML content to a Word document and downloads it
+     *
+     * @param string $htmloutput The HTML content to convert to Word format
+     * @param object $settings The booking option settings object containing title information
+     *
+     * Takes HTML content, converts it to a Word document using PHPWord library,
+     * saves it to a temporary file and forces download of the resulting .docx file.
+     * The filename is based on the booking option title.
+     *
+     * @throws Exception If file cannot be read or downloaded
+     * @return void
+     */
+    private function download_word_from_html($htmloutput, $settings) {
+        global $DB, $PAGE;
+        $worddoc = new \PhpOffice\PhpWord\PhpWord();
+        \PhpOffice\PhpWord\Settings::setOutputEscapingEnabled(true);
+        $pageorientation = ($this->orientation === 'L') ? 'landscape' : 'portrait';
+        $sectionstyle = [
+        'orientation' => $pageorientation,
+        ];
+        $section = $worddoc->addSection($sectionstyle);
+
+        \PhpOffice\PhpWord\Shared\Html::addHtml($section, $htmloutput, false, false);
+        $extrasessioncols = $this->get_extra_session_columns();
+
+        // Write the document to a temporary file.
+        $filename = $settings->get_title_with_prefix() . '.docx';
+        $temppath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $filename;
+        try {
+            // Save the document.
+            $worddoc->save($temppath, 'Word2007');
+            // Make sure any output buffers are clean.
+            if (ob_get_contents()) {
+                ob_end_clean();
+            }
+            // Check file exists and is readable.
+            if (file_exists($temppath) && is_readable($temppath)) {
+                // Set headers for download.
+                header("Content-Description: File Transfer");
+                header("Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+                header('Content-Disposition: attachment; filename="' . basename($filename) . '"');
+                header("Cache-Control: must-revalidate");
+                header("Expires: 0");
+                header("Pragma: public");
+                header("Content-Length: " . filesize($temppath));
+                // Clear output buffer and stream the file.
+                ob_clean();
+                flush();
+                readfile($temppath);
+                // Proper exit.
+                exit;
+            } else {
+                throw new Exception("File could not be read.");
+            }
+        } catch (Exception $e) {
+            // Handle and log exceptions.
+            echo "An error occurred while downloading the document: " . $e->getMessage();
+        }
+    }
+
+
+
+    /**
+     * Download PDF File from given html
+     *
+     * @param mixed $htmloutput
+     * @param mixed $settings
+     *
+     * @return void
+     *
+     */
+    private function download_pdf_from_html($htmloutput, $settings) {
+        $pdf = new signin_pdf($this->orientation, PDF_UNIT, PDF_PAGE_FORMAT);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->AddPage();
+        $pdf->writeHTML($htmloutput, true, false, true, false, '');
+        $filenamepdf = $settings->get_title_with_prefix() . '.pdf';
+        $pdf->Output(sys_get_temp_dir() . DIRECTORY_SEPARATOR . $filenamepdf, 'F');
+        $downloadfilename = $settings->get_title_with_prefix();
+        // Replace special characters to prevent errors.
+        $downloadfilename = str_replace(' ', '_', $downloadfilename); // Replaces all spaces with underscores.
+        $downloadfilename = preg_replace('/[^A-Za-z0-9\_]/', '', $downloadfilename); // Removes special chars.
+        $downloadfilename = preg_replace('/\_+/', '_', $downloadfilename); // Replace multiple underscores with exactly one.
+        $downloadfilename = format_string($downloadfilename);
+        $pdf->Output($downloadfilename . '.pdf', 'D');
+    }
+
+
+
+
+    /**
+     * Generate PDF and prepare it for download
+     */
+    public function download_signinsheet() {
+        global $DB, $PAGE;
+        $groupparams = [];
+        $addsqlwhere = '';
+
+        $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
+
+        if (
+            groups_get_activity_groupmode($this->bookingoption->booking->cm) == SEPARATEGROUPS &&
+                 !has_capability(
+                     'moodle/site:accessallgroups',
+                     \context_course::instance($this->bookingoption->booking->course->id)
+                 )
+        ) {
+            [$groupsql, $groupparams] = \mod_booking\booking::booking_get_groupmembers_sql(
+                $this->bookingoption->booking->course->id
+            );
+            $addsqlwhere .= " AND u.id IN ($groupsql)";
+        }
+
+        $userinfofields = $DB->get_records('user_info_field', []);
+        $remove = [
+            'signinextracols1',
+            'signinextracols2',
+            'signinextracols3',
+            'fullname',
+            'firstname',
+            'lastname',
+            'signature',
+            'rownumber',
+            'role',
+            'userpic',
+            'places',
+        ];
+
+        foreach ($userinfofields as $field) {
+            $remove[] = $field->shortname;
+        }
+
+        $mainuserfields = \core_user\fields::for_name()->get_sql('u')->selects;
+        $mainuserfields = trim($mainuserfields, ', ');
+
+        $userfields = array_diff($this->allfields, $remove);
+        if (!empty($userfields)) {
+            $userfields = ', u.' . implode(', u.', $userfields);
+        } else {
+            $userfields = '';
+        }
+
+        [$select1, $from1, $filter1, $params1] = booking_option_settings::return_sql_for_custom_profile_field($userinfofields);
+
+        $spinorequal = sharedplaces::return_shared_places_where_sql($settings->id, $groupparams);
+        $where = " ba.optionid $spinorequal ";
+
+        $sql =
+        "SELECT u.id, ba.timecreated as bookingtime, ba.places, " . $mainuserfields . $userfields . $select1 .
+        " FROM {booking_answers} ba
+        LEFT JOIN {user} u ON u.id = ba.userid
+        $from1
+        WHERE $where AND ba.waitinglist = 0 " .
+                 $addsqlwhere . "ORDER BY u.{$this->orderby} ASC";
+
+        $users = $DB->get_records_sql(
+            $sql,
+            array_merge(
+                $groupparams,
+                ['optionid' => $this->optionid]
+            )
+        );
 
         // Create fake users for adding empty rows.
         if ($this->addemptyrows > 0) {
-            $fakeuser = new \stdClass();
+            $fakeuser = new stdClass();
             $fakeuser->id = 0;
             $fakeuser->city = '';
             $fakeuser->firstname = '';
@@ -374,19 +773,21 @@ class signinsheet_generator {
         }
 
         if ($this->includeteachers) {
-
             $mainuserfields = \core_user\fields::for_name()->get_sql('u')->selects;
             $mainuserfields = trim($mainuserfields, ', ');
 
             $teachers = $DB->get_records_sql(
-                    'SELECT u.id, ' . $mainuserfields . $userfields .
+                'SELECT u.id, ' . $mainuserfields . $userfields .
                     '
             FROM {booking_teachers} bt
             LEFT JOIN {user} u ON u.id = bt.userid
             WHERE bt.optionid = :optionid ' .
                     $addsqlwhere . "ORDER BY u.{$this->orderby} ASC",
-                    array_merge($groupparams,
-                            ['optionid' => $this->optionid]));
+                array_merge(
+                    $groupparams,
+                    ['optionid' => $this->optionid]
+                )
+            );
             foreach ($teachers as $teacher) {
                 $teacher->isteacher = true;
                 array_push($users, $teacher);
@@ -463,50 +864,60 @@ class signinsheet_generator {
                             $name = "{$user->lastname}, {$user->firstname}";
                         }
                         break;
+                    case 'firstname':
+                        $w = 20;
+                        $name = $user->firstname ?? '';
+                        break;
+                    case 'lastname':
+                        $w = 20;
+                        $name = $user->lastname ?? '';
+                        break;
                     case 'signature':
                         $w = 40;
-                        $name = "";
+                        $name = $user->signature ?? '';
                         break;
                     case 'institution':
-                        $name = $user->institution;
+                        $name = $user->institution ?? '';
                         break;
                     case 'description':
-                        $name = format_text_email($user->description, FORMAT_HTML);
+                        $name = format_text_email($user->description ?? '', FORMAT_HTML);
                         break;
                     case 'city':
-                        $name = $user->city;
+                        $name = $user->city ?? '';
                         break;
                     case 'country':
-                        $name = $user->country;
+                        $name = $user->country ?? '';
                         break;
                     case 'idnumber':
-                        $name = $user->idnumber;
+                        $name = $user->idnumber ?? '';
                         break;
                     case 'email':
                         $w = 60;
-                        $name = $user->email;
+                        $name = $user->email ?? '';
                         break;
                     case 'phone1':
-                        $name = $user->phone1;
+                        $name = $user->phone1 ?? '';
                         break;
                     case 'department':
-                        $name = $user->department;
+                        $name = $user->department ?? '';
                         break;
                     case 'address':
-                        $name = $user->address;
+                        $name = $user->address ?? '';
                         break;
                     case 'places':
                         $w = 15;
-                        $name = $user->places;
+                        $name = $user->places ?? '';
                         break;
                     case 'role':
                             // Check if the user is a fake user.
                         if ($user->id > 0) {
                             $roles = get_user_roles(\context_system::instance(), $user->id);
                             $rolenames = array_map(
-                                    function ($role) {
-                                        return $role->name;
-                                    }, $roles);
+                                function ($role) {
+                                    return $role->name;
+                                },
+                                $roles
+                            );
                             $name = implode(", ", $rolenames);
                         } else {
                             $name = '';
@@ -531,8 +942,8 @@ class signinsheet_generator {
                         if (@getimagesize($out)) {
                             $this->pdf->Image(
                                 $out,
-                                '',
-                                '',
+                                null,
+                                null,
                                 0,
                                 $h,
                                 '',
@@ -583,8 +994,17 @@ class signinsheet_generator {
                     continue;
                 }
                 if ($rotate) {
-                    $this->pdf->Cell(6, $h, $name, 1, (count($this->allfields) == $c ? 1 : 0),
-                        '', 0, "", 1);
+                    $this->pdf->Cell(
+                        6,
+                        $h,
+                        $name,
+                        1,
+                        (count($this->allfields) == $c ? 1 : 0),
+                        '',
+                        0,
+                        "",
+                        1
+                    );
                 } else {
                     if ($c == 1) {
                         $this->pdf->SetY($this->pdf->GetY() - 5, false);
@@ -635,21 +1055,29 @@ class signinsheet_generator {
                 // Show all sessions.
                 $val = [];
                 foreach ($settings->sessions as $time) {
-                    $tmpdate = new \stdClass();
-                    $tmpdate->leftdate = userdate($time->coursestarttime,
-                            get_string('strftimedatetime', 'langconfig'));
-                    $tmpdate->righttdate = userdate($time->courseendtime,
-                            get_string('strftimetime', 'langconfig'));
+                    $tmpdate = new stdClass();
+                    $tmpdate->leftdate = userdate(
+                        $time->coursestarttime,
+                        get_string('strftimedatetime', 'langconfig')
+                    );
+                    $tmpdate->righttdate = userdate(
+                        $time->courseendtime,
+                        get_string('strftimetime', 'langconfig')
+                    );
                     $val[] = get_string('leftandrightdate', 'booking', $tmpdate);
                 }
                 $this->sessionsstring = implode("\n", $val);
                 return;
             } else {
                 // Show a specific selected session.
-                $this->sessionsstring = userdate($settings->sessions[$this->pdfsessions]->coursestarttime,
-                        get_string('strftimedatetime', 'langconfig'));
-                $this->sessionsstring .= ' - ' . userdate($settings->sessions[$this->pdfsessions]->courseendtime,
-                        get_string('strftimetime', 'langconfig'));
+                $this->sessionsstring = userdate(
+                    $settings->sessions[$this->pdfsessions]->coursestarttime,
+                    get_string('strftimedatetime', 'langconfig')
+                );
+                $this->sessionsstring .= ' - ' . userdate(
+                    $settings->sessions[$this->pdfsessions]->courseendtime,
+                    get_string('strftimetime', 'langconfig')
+                );
                 return;
             }
         }
@@ -675,13 +1103,17 @@ class signinsheet_generator {
                 // Add columns for all sessions.
                 $val = [];
                 foreach ($settings->sessions as $session) {
-                    $sessioncolnames[] = userdate($session->coursestarttime,
-                        get_string('strftimedateshortmonthabbr', 'langconfig'));
+                    $sessioncolnames[] = userdate(
+                        $session->coursestarttime,
+                        get_string('strftimedateshortmonthabbr', 'langconfig')
+                    );
                 }
             } else {
                 // Add a column for a specific session.
-                $sessioncolnames[] = userdate($settings->sessions[$this->extrasessioncols]->coursestarttime,
-                        get_string('strftimedateshortmonthabbr', 'langconfig'));
+                $sessioncolnames[] = userdate(
+                    $settings->sessions[$this->extrasessioncols]->coursestarttime,
+                    get_string('strftimedateshortmonthabbr', 'langconfig')
+                );
             }
         }
 
@@ -697,12 +1129,24 @@ class signinsheet_generator {
     public function get_signinsheet_logo() {
         $fs = get_file_storage();
         $context = \context_module::instance($this->bookingoption->booking->cm->id);
-        $files = $fs->get_area_files($context->id, 'mod_booking', 'signinlogoheader',
-                $this->bookingoption->booking->settings->id, 'sortorder,filepath,filename', false);
+        $files = $fs->get_area_files(
+            $context->id,
+            'mod_booking',
+            'signinlogoheader',
+            $this->bookingoption->booking->settings->id,
+            'sortorder,filepath,filename',
+            false
+        );
 
         if (!$files) {
-            $files = $fs->get_area_files(\context_system::instance()->id, 'booking',
-                    'mod_booking_signinlogo', 0, 'sortorder,filepath,filename', false);
+            $files = $fs->get_area_files(
+                \context_system::instance()->id,
+                'mod_booking',
+                'mod_booking_signinlogo',
+                0,
+                'sortorder,filepath,filename',
+                false
+            );
         }
 
         if ($files) {
@@ -732,12 +1176,24 @@ class signinsheet_generator {
         $fileuse = false;
         $fs = get_file_storage();
         $context = \context_module::instance($this->bookingoption->booking->cm->id);
-        $files = $fs->get_area_files($context->id, 'mod_booking', 'signinlogofooter',
-                $this->bookingoption->booking->settings->id, 'sortorder,filepath,filename', false);
+        $files = $fs->get_area_files(
+            $context->id,
+            'mod_booking',
+            'signinlogofooter',
+            $this->bookingoption->booking->settings->id,
+            'sortorder,filepath,filename',
+            false
+        );
 
         if (!$files) {
-            $files = $fs->get_area_files(\context_system::instance()->id, 'booking',
-                    'mod_booking_signinlogo_footer', 0, 'sortorder,filepath,filename', false);
+            $files = $fs->get_area_files(
+                \context_system::instance()->id,
+                'booking',
+                'mod_booking_signinlogo_footer',
+                0,
+                'sortorder,filepath,filename',
+                false
+            );
         }
 
         if ($files) {
@@ -752,7 +1208,7 @@ class signinsheet_generator {
      *
      * @param array $extracols
      */
-    public function set_page_header($extracols =  []) {
+    public function set_page_header($extracols = []) {
         global $DB;
 
         $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
@@ -761,11 +1217,28 @@ class signinsheet_generator {
         $this->pdf->SetXY(18, $this->pdf->getY() - 15);
 
         if ($this->get_signinsheet_logo()) {
-            $this->pdf->Image('@' . $this->signinsheetlogo->get_content(), '', '', $this->w, $this->h, '', '', 'T',
-                    true, 150, 'R', false, false, 0, false, false, false);
+            $this->pdf->Image(
+                '@' . $this->signinsheetlogo->get_content(),
+                null,
+                null,
+                $this->w,
+                $this->h,
+                '',
+                '',
+                'T',
+                true,
+                150,
+                'R',
+                false,
+                false,
+                0,
+                false,
+                false,
+                false
+            );
         }
         // Empty multicell for spacing.
-        $this->pdf->MultiCell(55, 5, '', 0, '', 0, 1, '', '', true);
+        $this->pdf->MultiCell(55, 5, '', 0, '', 0, 1, null, null, true);
 
         $this->pdf->SetFont('freesans', '', 10);
 
@@ -775,12 +1248,22 @@ class signinsheet_generator {
             $headertitle = format_string($this->bookingoption->booking->settings->name) . ': ' .
                 format_string($settings->get_title_with_prefix());
         } else {
-            $headertitle = format_string($this->bookingoption->booking->settings->name, '');
+            $headertitle = format_string($this->bookingoption->booking->settings->name, null);
         }
 
-        $this->pdf->writeHTMLCell(0, 0, $this->pdf->GetX(), 15,
+        $this->pdf->writeHTMLCell(
+            0,
+            0,
+            $this->pdf->GetX(),
+            15,
             '<h3>' . $headertitle . '</h3>',
-            0, 1, false, true, 'L', false);
+            0,
+            1,
+            false,
+            true,
+            'L',
+            false
+        );
 
         $this->pdf->SetY($this->pdf->GetY() + 2);
 
@@ -792,38 +1275,83 @@ class signinsheet_generator {
                 } else {
                     $nametobeshown = $settings->entity['name'] ?? $settings->location ?? '';
                 }
-                $this->pdf->Cell(0, 0,
-                    get_string('signinsheetlocation', 'booking') . format_string($nametobeshown), 0, 1,
-                    '', 0, '', 1);
+                $this->pdf->Cell(
+                    0,
+                    0,
+                    get_string('signinsheetlocation', 'booking') . format_string($nametobeshown),
+                    0,
+                    1,
+                    '',
+                    0,
+                    '',
+                    1
+                );
             }
         } else if (!empty($settings->location)) {
-            $this->pdf->Cell(0, 0,
-                    get_string('signinsheetlocation', 'booking') . format_string($settings->location), 0, 1,
-                    '', 0, '', 1);
+            $this->pdf->Cell(
+                0,
+                0,
+                get_string('signinsheetlocation', 'booking') . format_string($settings->location),
+                0,
+                1,
+                '',
+                0,
+                '',
+                1
+            );
         }
 
         if (!empty(trim($settings->address ?? ''))) {
-            $this->pdf->Cell(0, 0,
-                    get_string('signinsheetaddress', 'booking') . format_string($settings->address), 0, 1,
-                    '', 0, '', 1);
+            $this->pdf->Cell(
+                0,
+                0,
+                get_string('signinsheetaddress', 'booking') . format_string($settings->address),
+                0,
+                1,
+                '',
+                0,
+                '',
+                1
+            );
         }
 
         if (!empty($settings->dayofweektime)) {
-            $this->pdf->Cell(0, 0,
-                    get_string('dayofweektime', 'mod_booking') . ': ' . format_string($settings->dayofweektime), 0, 1,
-                    '', 0, '', 1);
+            $this->pdf->Cell(
+                0,
+                0,
+                get_string('dayofweektime', 'mod_booking') . ': ' . format_string($settings->dayofweektime),
+                0,
+                1,
+                '',
+                0,
+                '',
+                1
+            );
         }
 
-        $this->pdf->MultiCell($this->cellwidthteachers, 0,
-                get_string('teachers', 'mod_booking') . ": " . implode(', ', $this->teachers), 0, 1, '',
-                0);
+        $this->pdf->MultiCell(
+            $this->cellwidthteachers,
+            0,
+            get_string('teachers', 'mod_booking') . ": " . implode(', ', $this->teachers),
+            0,
+            1,
+            false,
+            0
+        );
         $this->pdf->Ln();
 
         // Do not show dates, if the option "Add date manually" (-1) or the option...
         // ... "Hide date" (-2) was selected in the form.
         if ($this->pdfsessions != -1 && $this->pdfsessions != -2) {
-            $this->pdf->MultiCell($this->pdf->GetStringWidth(get_string('signinsheetdate', 'booking')) + 5, 0,
-                get_string('signinsheetdate', 'booking'), 0, 1, '', 0);
+            $this->pdf->MultiCell(
+                $this->pdf->GetStringWidth(get_string('signinsheetdate', 'booking')) + 5,
+                0,
+                get_string('signinsheetdate', 'booking'),
+                0,
+                1,
+                false,
+                0
+            );
             $this->pdf->SetFont('freesans', '', 8);
             $this->pdf->MultiCell(0, 0, $this->sessionsstring, 0, 'L', false, 1);
         }
@@ -832,7 +1360,7 @@ class signinsheet_generator {
 
         if (!empty($this->cfgcustfields)) {
             $customfields = \mod_booking\booking_option::get_customfield_settings();
-            list($insql, $params) = $DB->get_in_or_equal($this->cfgcustfields);
+            [$insql, $params] = $DB->get_in_or_equal($this->cfgcustfields);
             $sql = "SELECT bc.cfgname, bc.value
                   FROM {booking_customfields} bc
                  WHERE cfgname $insql
@@ -841,11 +1369,21 @@ class signinsheet_generator {
             if (!empty($custfieldvalues)) {
                 foreach ($custfieldvalues as $record) {
                     if (!empty($record->value)) {
-                        $this->pdf->Cell(0, 0,
-                                $customfields[$record->cfgname]['value'] . ": " .
-                                ($customfields[$record->cfgname]['type'] == 'multiselect' ? implode(", ",
-                                    explode("\n", $record->value)) : $record->value), 0, 1, '',
-                                    0, '', 1);
+                        $this->pdf->Cell(
+                            0,
+                            0,
+                            $customfields[$record->cfgname]['value'] . ": " .
+                                ($customfields[$record->cfgname]['type'] == 'multiselect' ? implode(
+                                    ", ",
+                                    explode("\n", $record->value)
+                                ) : $record->value),
+                            0,
+                            1,
+                            '',
+                            0,
+                            '',
+                            1
+                        );
                     }
                 }
             }
@@ -855,8 +1393,15 @@ class signinsheet_generator {
         $this->pdf->Ln();
 
         if ($this->pdfsessions == -1) {
-            $this->pdf->Cell($this->pdf->GetStringWidth(get_string('signinsheetdatetofillin', 'booking')) + 1, 0,
-                get_string('signinsheetdatetofillin', 'booking'), 0, 0, '', 0);
+            $this->pdf->Cell(
+                $this->pdf->GetStringWidth(get_string('signinsheetdatetofillin', 'booking')) + 1,
+                0,
+                get_string('signinsheetdatetofillin', 'booking'),
+                0,
+                0,
+                '',
+                0
+            );
             $this->pdf->Cell(100, 0, "", "B", 1, '', 0, '', 1);
             $this->pdf->Ln();
         }
@@ -909,6 +1454,14 @@ class signinsheet_generator {
                     } else {
                         $name = get_string('fullname', 'mod_booking');
                     }
+                    break;
+                case 'firstname':
+                    $w = 20;
+                    $name = get_string('firstname');
+                    break;
+                case 'lastname':
+                    $w = 20;
+                    $name = get_string('lastname');
                     break;
                 case 'signature':
                     $w = 40;
@@ -981,7 +1534,6 @@ class signinsheet_generator {
                         $this->hasrotatedfields = true;
                         $name = $value;
                     }
-
             }
 
             if ($rotate) {
@@ -989,8 +1541,17 @@ class signinsheet_generator {
                 $this->pdf->SetY($this->pdf->GetY() + 15, false);
                 $this->pdf->StartTransform();
                 $this->pdf->Rotate(90);
-                $this->pdf->Cell(15, 6, $name, 1, (count($this->allfields) == $c ? 1 : 0),
-                    '', 0, "", 1);
+                $this->pdf->Cell(
+                    15,
+                    6,
+                    $name,
+                    1,
+                    (count($this->allfields) == $c ? 1 : 0),
+                    '',
+                    0,
+                    "",
+                    1
+                );
                 $this->pdf->StopTransform();
                 $this->pdf->SetY($this->pdf->GetY() - 15, false);
                 $this->pdf->SetX($this->pdf->GetX() - 9);
@@ -1002,5 +1563,52 @@ class signinsheet_generator {
                 $this->pdf->Cell($w, 15, $name, 1, (count($this->allfields) == $c ? 1 : 0), '', 0, '', 1);
             }
         }
+    }
+
+    /**
+     * Get the default HTML for the sign-in sheet.
+     * @return string
+     */
+    protected function get_default_signinsheet_html(): string {
+        return
+            '<table width="100%" style="border: none" >
+                <tr>
+                    <td>
+                        <h1 style="font-size: 20px">[[tablename]]</h1>
+                    </td>
+                    <td style="text-align: right;">
+                        <img src="[[logourl]]" width="100" />
+                    </td>
+                </tr>
+            </table>
+
+            <h4 style="font-weight: bold">' . get_string('teachers', 'mod_booking') . ':</h4>
+            <p>[[teachers]]</p>
+
+            <h4 style="font-weight: bold">' . get_string('location', 'mod_booking') . ':</h4>
+            <p>[[location]]</p>
+
+            <h4 style="font-weight: bold">' . get_string('dayofweektime', 'mod_booking') . ':</h4>
+            <p>[[dayofweektime]]</p>
+
+            <h4 style="font-weight: bold">' . get_string('dates', 'mod_booking') . ':</h4>
+            <p>[[dates]]</p>
+
+            <table class="signaturetable" cellpadding="5" border="1" width="100%" style="border-collapse: collapse;">
+                <tr>
+                    <th style="text-align: center; vertical-align: middle;">' . get_string('fullname', 'mod_booking') . '</th>
+                    <th style="text-align: center; vertical-align: middle;">' . get_string('email', 'mod_booking') . '</th>
+                    <th style="text-align: center; vertical-align: middle;">' . get_string('signature', 'mod_booking') . '</th>
+                    <th style="text-align: center; vertical-align: middle;"></th>
+                </tr>
+                [[users]]
+                <tr>
+                    <td style="text-align: center; vertical-align: middle;">[[fullname]]</td>
+                    <td style="text-align: center; vertical-align: middle;">[[email]]</td>
+                    <td style="text-align: center; vertical-align: middle;">[[signature]]</td>
+                    <td></td>
+                </tr>
+                [[/users]]
+            </table>';
     }
 }

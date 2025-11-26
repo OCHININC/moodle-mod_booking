@@ -20,6 +20,7 @@ use mod_booking\booking_campaigns\booking_campaign;
 use mod_booking\booking_campaigns\campaigns_info;
 use mod_booking\booking_option_settings;
 use mod_booking\customfield\booking_handler;
+use mod_booking\option\time_handler;
 use mod_booking\singleton_service;
 use mod_booking\task\purge_campaign_caches;
 use MoodleQuickForm;
@@ -37,7 +38,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license     http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class campaign_customfield implements booking_campaign {
-
     /** @var int $id */
     public $id = 0;
 
@@ -140,14 +140,25 @@ class campaign_customfield implements booking_campaign {
 
         campaigns_info::add_customfields_to_form($mform, $ajaxformdata);
 
-        $mform->addElement('date_time_selector', 'starttime', get_string('campaignstart', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'starttime',
+            get_string('campaignstart', 'mod_booking'),
+            time_handler::set_timeintervall(),
+        );
         $mform->setType('starttime', PARAM_INT);
         $mform->addHelpButton('starttime', 'campaignstart', 'mod_booking');
+        $mform->setDefault('starttime', time_handler::prettytime(time()));
 
-        $mform->addElement('date_time_selector', 'endtime', get_string('campaignend', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'endtime',
+            get_string('campaignend', 'mod_booking'),
+            time_handler::set_timeintervall(),
+        );
         $mform->setType('endtime', PARAM_INT);
         $mform->addHelpButton('endtime', 'campaignend', 'mod_booking');
-
+        $mform->setDefault('endtime', time_handler::prettytime(time()));
         // Price factor (multiplier).
         $mform->addElement('float', 'pricefactor', get_string('pricefactor', 'mod_booking'), null);
         $mform->setDefault('pricefactor', 1);
@@ -323,7 +334,7 @@ class campaign_customfield implements booking_campaign {
 
         // Filter for the booking answers created before campaign started.
         $nrofbookedusers = 0;
-        foreach ($ba->usersonlist as $answer) {
+        foreach ($ba->get_usersonlist() as $answer) {
             if ($answer->timecreated < $this->starttime) {
                 $nrofbookedusers++;
             }
@@ -384,5 +395,13 @@ class campaign_customfield implements booking_campaign {
      */
     public function get_id_of_campaign(): int {
         return $this->id ?? 0;
+    }
+
+    /**
+     * Return boolean if price is user-specific.
+     * @return bool
+     */
+    public function user_specific_price(): bool {
+        return $this->userspecificprice;
     }
 }

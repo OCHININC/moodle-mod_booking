@@ -30,6 +30,7 @@ use context_system;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
 use mod_booking\booking_option_settings;
+use mod_booking\option\time_handler;
 use MoodleQuickForm;
 use stdClass;
 
@@ -55,7 +56,7 @@ class booking_time implements bo_condition {
     public $overridable = true;
 
     /** @var bool $overwrittenbybillboard Indicates if the condition can be overwritten by the billboard. */
-    public $overwrittenbybillboard = true;
+    public $overwrittenbybillboard = false;
 
     /**
      * Get the condition id.
@@ -129,13 +130,18 @@ class booking_time implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
+        $where = "(
+                    sqlfilter <> 2
 
-        $where = "((bookingopeningtime < 1 OR bookingopeningtime < :bookingopeningtimenow1)
-                  AND (bookingclosingtime < 1 OR bookingclosingtime > :bookingopeningtimenow2))";
+                    OR (
+                        (bookingopeningtime < 1 OR bookingopeningtime < :bookingopeningtimenow1)
+                        AND (bookingclosingtime < 1 OR bookingclosingtime > :bookingopeningtimenow2)
+                    )
+                  )";
 
         // Using realtime here would destroy our caching.
         // Cache would be invalidated every second.
@@ -198,7 +204,7 @@ class booking_time implements bo_condition {
 
         $isavailable = $this->is_available($settings, $userid, $not);
 
-        $description = $this->get_description_string($isavailable, $full, $settings);
+        $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_NONE, MOD_BOOKING_BO_BUTTON_MYALERT];
     }
@@ -219,8 +225,14 @@ class booking_time implements bo_condition {
             get_string('restrictanswerperiodopening', 'mod_booking')
         );
 
-        $mform->addElement('date_time_selector', 'bookingopeningtime', get_string('from', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'bookingopeningtime',
+            get_string('from', 'mod_booking'),
+            time_handler::set_timeintervall(),
+        );
         $mform->setType('bookingopeningtime', PARAM_INT);
+        $mform->setDefault('bookingopeningtime', time_handler::prettytime(time()));
         $mform->hideIf('bookingopeningtime', 'restrictanswerperiodopening', 'notchecked');
 
         $mform->addElement(
@@ -229,8 +241,14 @@ class booking_time implements bo_condition {
             get_string('restrictanswerperiodclosing', 'mod_booking')
         );
 
-        $mform->addElement('date_time_selector', 'bookingclosingtime', get_string('until', 'mod_booking'));
+        $mform->addElement(
+            'date_time_selector',
+            'bookingclosingtime',
+            get_string('until', 'mod_booking'),
+            time_handler::set_timeintervall(),
+        );
         $mform->setType('bookingclosingtime', PARAM_INT);
+        $mform->setDefault('bookingclosingtime', time_handler::prettytime(time()));
         $mform->hideIf('bookingclosingtime', 'restrictanswerperiodclosing', 'notchecked');
 
         $mform->addElement(

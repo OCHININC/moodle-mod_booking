@@ -25,6 +25,8 @@
 
 namespace mod_booking\output;
 
+use context_system;
+use mod_booking\singleton_service;
 use moodle_url;
 use renderer_base;
 use renderable;
@@ -40,7 +42,6 @@ use user_picture;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class business_card implements renderable, templatable {
-
     /** @var string $username the note as it is saved in db */
     public $username = null;
 
@@ -65,6 +66,9 @@ class business_card implements renderable, templatable {
     /** @var string $points */
     public $points = null;
 
+    /** @var string $errormessage */
+    public $errormessage = null;
+
     /**
      * Constructor
      *
@@ -76,8 +80,24 @@ class business_card implements renderable, templatable {
 
         global $PAGE;
 
+        $syscontext = context_system::instance();
+
         $user = user_get_users_by_id([$userid]);
         $user = reset($user);
+
+        // Add safety, if - for some reason - user is  not found.
+        if (empty($user)) {
+            // Try once more using singleton.
+            $user = singleton_service::get_instance_of_user($userid);
+            // If it's still empty, we prepare the template to show an error.
+            if (empty($user)) {
+                if (has_capability('mod/booking:updatebooking', $syscontext)) {
+                    $this->errormessage = get_string('errorusernotfound', 'mod_booking', $userid);
+                }
+                return;
+            }
+        }
+
         $userpic = new user_picture($user);
         $userpic->size = 200;
         $userpictureurl = $userpic->get_url($PAGE);
@@ -86,9 +106,9 @@ class business_card implements renderable, templatable {
         $userdescription = format_text($user->description, $user->descriptionformat);
 
         $this->username = "$user->firstname $user->lastname";
-        $this->userpictureurl = $userpictureurl;
-        $this->userprofileurl = $userprofileurl;
-        $this->sendmessageurl = $sendmessageurl;
+        $this->userpictureurl = $userpictureurl->out();
+        $this->userprofileurl = $userprofileurl->out();
+        $this->sendmessageurl = $sendmessageurl->out();
         $this->userdescription = $userdescription;
         $this->duration = $bookingsettings->duration;
         $this->points = null;
@@ -108,13 +128,14 @@ class business_card implements renderable, templatable {
      */
     public function export_for_template(renderer_base $output) {
         return [
-                'username' => $this->username,
-                'userpictureurl' => $this->userpictureurl->out(),
-                'userprofileurl' => $this->userprofileurl->out(),
-                'sendmessageurl' => $this->sendmessageurl->out(),
-                'userdescription' => $this->userdescription,
-                'duration' => $this->duration,
-                'points' => $this->points,
+            'username' => $this->username,
+            'userpictureurl' => $this->userpictureurl,
+            'userprofileurl' => $this->userprofileurl,
+            'sendmessageurl' => $this->sendmessageurl,
+            'userdescription' => $this->userdescription,
+            'duration' => $this->duration,
+            'points' => $this->points,
+            'errormessage' => $this->errormessage,
         ];
     }
 }

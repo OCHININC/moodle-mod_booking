@@ -163,6 +163,7 @@ tr.mod-booking-invisible {
     margin-top: 30px;
 }
 
+.course-content .activity-altcontent .wunderbyte-table-grid ul.infolist,
 .wunderbyte-table-grid ul.infolist,
 .course-content li.section li.activity ul ul.infolist {
     list-style: none;
@@ -341,8 +342,6 @@ if there only was one booking option. */
 #page-mod-booking-optiontemplatessettings .dropdown-menu,
 #page-mod-booking-teachers_instance_report .dropdown-menu,
 #page-mod-booking-recalculateprices .dropdown-menu,
-#page-mod-booking-customreporttemplatesadd .dropdown-menu,
-#page-mod-booking-customreporttemplates .dropdown-menu,
 #page-mod-booking-mod .dropdown-menu,
 #page-mod-booking-view .dropdown-menu,
 #page-mod-booking-instancetemplateadd .dropdown-menu,
@@ -460,7 +459,8 @@ if there only was one booking option. */
 }
 
 /* DO NOT USE #page-mod-booking-view because this needs to work in shortcodes too! */
-.mod-booking-view-list-image.rounded-left {
+.mod-booking-view-list-image.rounded-left,
+.mod-booking-view-list-image.rounded-start {
     box-shadow: 3px 0 10px 1px rgba(0, 0, 0, 0.1);
     /* stylelint-disable-next-line declaration-no-important */
     border-top-right-radius: 0 !important;
@@ -469,7 +469,8 @@ if there only was one booking option. */
 }
 
 /* DO NOT USE #page-mod-booking-view because this needs to work in shortcodes too! */
-.mod-booking-view-list-image.rounded-right {
+.mod-booking-view-list-image.rounded-right,
+.mod-booking-view-list-image.rounded-end {
     box-shadow: -3px 0 10px 1px rgba(0, 0, 0, 0.1);
     /* stylelint-disable-next-line declaration-no-important */
     border-top-left-radius: 0 !important;
@@ -499,7 +500,7 @@ if there only was one booking option. */
 }
 
 .bookinglinkbutton:not(#page-mod-booking-optionview .bookinglinkbutton) {
-    background: var(--primary);
+    background: var(--primary, var(--bs-btn-bg));
     border-radius: 8px;
     color: white;
     text-decoration: none;
@@ -532,16 +533,6 @@ We need this for teachers for example. */
     border-bottom: 0;
 }
 
-#page-mod-booking-report2 div[class^='wunderbyte_table_container_'] {
-    /* stylelint-disable-next-line declaration-no-important */
-    margin: 0 !important;
-}
-
-#page-mod-booking-report2 .pagination {
-    font-size: calc(0.9rem + 0.045vw);
-    margin-left: 20px;
-}
-
 .disabled-profeature {
     color: grey;
     pointer-events: none; /* Disables clicks */
@@ -558,4 +549,59 @@ We need this for teachers for example. */
 
 .bookingoption-edit-button {
     text-decoration: none;
+}
+
+/* GH-936 Better distinction between availabilities. */
+div.checkbox:has(label[for^="id_bo_cond_allowedtobookininstance_capabilitynotneeded"]) {
+    left: 20px;
+}
+
+/* Bookings Tracker (report2) */
+.bookingstracker-header {
+    font-weight: bold;
+    font-size: large;
+    margin: 10px 0;
+    color: #0f6cbf;
+}
+
+#page-mod-booking-report2 div[class^='wunderbyte_table_container_'] {
+    /* stylelint-disable-next-line declaration-no-important */
+    margin: 0 !important;
+}
+
+#page-mod-booking-report2 .pagination {
+    font-size: calc(0.9rem + 0.045vw);
+    margin-left: 20px;
+}
+
+#page-mod-booking-report2 .pagination {
+    font-size: calc(0.9rem + 0.045vw);
+    margin-left: 20px;
+}
+
+.report2-nav-divider {
+    margin-left: 3px;
+    margin-right: 3px;
+    font-size: x-large;
+}
+
+#page-mod-booking-report2 #accordion-usertables .sortcolumn {
+    background-color: transparent;
+}
+
+/* Booking config settings. */
+#page-admin-setting-modsettingbooking #admin-selectteacherswithprofilefieldonlyfield,
+#page-admin-setting-modsettingbooking #admin-selectteacherswithprofilefieldonlyvalue {
+    margin-left: 75px;
+}
+
+.row .condition-customform,
+.row .condition-confirmation,
+.row .condition-bookingpolicy-form,
+.row .bookingoption-description-prepagemodal-bookit {
+    flex-shrink: 1;
+}
+
+.condition-bookingpolicy-form .checkbox {
+    display: flex;
 }

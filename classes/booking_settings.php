@@ -27,7 +27,6 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class booking_settings {
-
     /** @var int $cmid of booking instance. */
     public $cmid = null;
 
@@ -114,6 +113,9 @@ class booking_settings {
 
     /** @var int $addtogroup */
     public $addtogroup = null;
+
+    /** @var array $addtogroupofcurrentcourse */
+    public $addtogroupofcurrentcourse = null;
 
     /** @var string $categoryid One or more category ids - separated with commas. */
     public $categoryid = null;
@@ -229,9 +231,6 @@ class booking_settings {
     /** @var int $daystonotify2 */
     public $daystonotify2 = null;
 
-    /** @var int $enablepresence */
-    public $enablepresence = null;
-
     /** @var int $completionmodule */
     public $completionmodule = null;
 
@@ -295,9 +294,6 @@ class booking_settings {
     /** @var string $showviews */
     public $showviews = null;
 
-    /** @var int $customtemplateid */
-    public $customtemplateid = null;
-
     /** @var int $autcractive */
     public $autcractive = null;
 
@@ -328,7 +324,7 @@ class booking_settings {
     /** @var int $enforceteacherorder */
     public $enforceteacherorder = null;
 
-    /** @var user $bookingmanageruser */
+    /** @var stdClass $bookingmanageruser */
     public $bookingmanageruser = null;
 
     /** @var string $json is used to store non performance critical data like disablecancel, viewparam */
@@ -345,6 +341,12 @@ class booking_settings {
     /** @var int $viewparam */
     public $viewparam = null;
 
+    /** @var int $switchtemplates checkbox (de-)activate template switcher */
+    public $switchtemplates = null;
+
+    /** @var array $switchtemplatesselection an array of templates for the template switcher */
+    public $switchtemplatesselection = null;
+
     /** @var int $overwriteblockingwarnings */
     public $overwriteblockingwarnings = null;
 
@@ -359,6 +361,18 @@ class booking_settings {
 
     /** @var int $allowupdatetimestamp */
     public $allowupdatetimestamp = null;
+
+    /** @var mixed $maxoptionsfromcategory */
+    public $maxoptionsfromcategory = null;
+
+    /** @var int $maxoptionsfrominstance */
+    public $maxoptionsfrominstance = null;
+
+    /** @var string $customfieldsforfilter */
+    public $customfieldsforfilter = null;
+
+    /** @var string $toporientation */
+    public $toporientation = null;
 
     /**
      * Constructor for the booking settings class.
@@ -401,7 +415,6 @@ class booking_settings {
 
         // If we don't get the cached object, we have to fetch it here.
         if ($dbrecord === null) {
-
             $sql = "SELECT b.*
                     FROM {course_modules} cm
                     JOIN {modules} m
@@ -412,7 +425,6 @@ class booking_settings {
                     AND cm.id = :cmid";
 
             $dbrecord = $DB->get_record_sql($sql, ["cmid" => $cmid]);
-
         }
 
         if ($dbrecord) {
@@ -484,7 +496,6 @@ class booking_settings {
             $this->scale = $dbrecord->scale;
             $this->whichview = $dbrecord->whichview;
             $this->daystonotify2 = $dbrecord->daystonotify2;
-            $this->enablepresence = $dbrecord->enablepresence;
             $this->completionmodule = $dbrecord->completionmodule;
             $this->responsesfields = $dbrecord->responsesfields;
             $this->reportfields = $dbrecord->reportfields;
@@ -504,9 +515,9 @@ class booking_settings {
             $this->coursepageshortinfo = $dbrecord->coursepageshortinfo;
             $this->bookingimagescustomfield = $dbrecord->bookingimagescustomfield;
             $this->defaultoptionsort = $dbrecord->defaultoptionsort;
+            $this->toporientation = $dbrecord->toporientation;
             $this->defaultsortorder = $dbrecord->defaultsortorder;
             $this->showviews = $dbrecord->showviews;
-            $this->customtemplateid = $dbrecord->customtemplateid;
             $this->autcractive = $dbrecord->autcractive;
             $this->autcrprofile = $dbrecord->autcrprofile;
             $this->autcrvalue = $dbrecord->autcrvalue;
@@ -525,22 +536,24 @@ class booking_settings {
             if (!empty($dbrecord->json)) {
                 $this->jsonobject = json_decode($this->json);
                 foreach ($this->jsonobject as $key => $value) {
-                    $this->$key = $value;
+                    if (property_exists($this, $key)) {
+                        $this->$key = $value;
+                    }
                 }
             } else {
                 $this->jsonobject = new stdClass();
             }
 
             // If we do not have it yet, we have to load the booking manager's user object from DB.
-            if (empty($dbrecord->bookingmanageruser) && !empty($dbrecord->bookingmanager)) {
+            if (($dbrecord->bookingmanageruser ?? null) === null && !empty($dbrecord->bookingmanager)) {
                 $dbrecord->bookingmanageruser = $this->load_bookingmanageruser_from_db($dbrecord->bookingmanager);
             }
             if (!empty($dbrecord->bookingmanageruser)) {
                 $this->bookingmanageruser = $dbrecord->bookingmanageruser;
             } else {
                 // Make sure, it's always null if booking manager could not be found.
-                $dbrecord->bookingmanageruser = null;
-                $this->bookingmanageruser = null;
+                $dbrecord->bookingmanageruser = (object)[];
+                $this->bookingmanageruser = (object)[];
             }
 
             return $dbrecord;
@@ -552,7 +565,7 @@ class booking_settings {
     /**
      * Function to load bookingmanager as user from DB.
      * @param string $username of a booking manager
-     * @return stdClass user object for booking manager
+     * @return stdClass|null user object for booking manager
      */
     private function load_bookingmanageruser_from_db(string $username) {
         global $DB;

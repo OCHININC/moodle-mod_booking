@@ -30,7 +30,6 @@ use stdClass;
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class bookingoptionsimporter {
-
     /**
      * Define settings and call fileparser.
      *
@@ -107,7 +106,7 @@ class bookingoptionsimporter {
         ?string $delimiter = null,
         ?string $encoding = null,
         ?string $dateformat = null
-        ) {
+    ) {
 
         $settings = new csvsettings($definedcolumns);
 
@@ -261,6 +260,18 @@ class bookingoptionsimporter {
                 'mandatory' => false,
                 'type' => PARAM_EMAIL,
                 'importinstruction' => get_string('importuseremail', 'mod_booking'),
+            ],
+            [
+                'name' => 'coursestarttime',
+                'mandatory' => false,
+                'type' => PARAM_TEXT,
+                'importinstruction' => "coursestarttime",
+            ],
+             [
+                'name' => 'courseendtime',
+                'mandatory' => false,
+                'type' => PARAM_TEXT,
+                'importinstruction' => "courseendtime",
             ],
         ];
         return $columnssequential;

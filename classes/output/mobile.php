@@ -128,18 +128,12 @@ class mobile {
         }
 
         $settings = singleton_service::get_instance_of_booking_option_settings($args['optionid']);
+        $bookingsettings = singleton_service::get_instance_of_booking_settings_by_cmid($settings->cmid);
         $customform = customform::return_formelements($settings);
         $mobileformbuilder = new mobileformbuilder();
 
         $data = (array)$settings->return_settings_as_stdclass();
 
-        $teachers = [];
-        foreach ($data['teachers'] as $teacher) {
-            $teacher->email = str_replace('@', '&#64;', $teacher->email);
-            $teachers[] = (array)$teacher;
-        }
-
-        $data['teachers'] = $teachers;
         $data['userid'] = $USER->id;
 
         $boinfo = new bo_info($settings);
@@ -162,7 +156,7 @@ class mobile {
                     }
                     if (empty($formvalidated)) {
                         $data['submit']['label'] = $button->data['main']['label'];
-                        $ionsubmissionhtml = $mobileformbuilder::submission_form_submitted($button);
+                        $ionsubmissionhtml = $mobileformbuilder::submission_form_submitted();
                     } else {
                         if ($customformuserdata !== false) {
                             $customform = $customformstore->translate_errors($customform, $formvalidated);
@@ -178,20 +172,53 @@ class mobile {
                 break;
             case MOD_BOOKING_BO_COND_PRICEISSET:
                 $price = price::get_price('option', $settings->id);
-                $data['nosubmit']['label'] = $price['price'] . " " . $price['currency'];
+                $data['nosubmit']['label'] = format_float($price['price'], 2) . " " . $price['currency'];
                 break;
             case MOD_BOOKING_BO_COND_BOOKINGPOLICY:
                 $data['nosubmit']['label'] = get_string('notbookable', 'mod_booking');
                 break;
             case MOD_BOOKING_BO_COND_ALREADYBOOKED:
-                $data['nosubmit']['label'] = get_string('alreadybooked', 'mod_booking');
+            case MOD_BOOKING_BO_COND_CONFIRMCANCEL:
+                $data['nosubmit']['label'] = get_string('booked', 'mod_booking');
+                $cancellabel = $id == MOD_BOOKING_BO_COND_ALREADYBOOKED ? get_string('cancelmyself', 'mod_booking') : $description;
                 self::render_course_button($data);
+                if ($bookingsettings->cancancelbook == '1') {
+                    $data['cancelbookingoption'] = [
+                        'itemid' => $data['id'],
+                        'area' => "option",
+                        'userid' => $USER->id,
+                        'label' => $cancellabel,
+                        'data' => '"{\"itemid\":\"' .
+                            $data['id'] .
+                            '\",\"componentname\":\"mod_booking\",\"area\":\"option\",\"userid\":\"' .
+                            $USER->id .
+                            ' \",\"results\":\"\",\"initialized\":\"true\"}"',
+                    ];
+                }
                 break;
             default:
                 $data['nosubmit']['label']
                     = !empty($description) ? $description : get_string('notbookable', 'mod_booking');
                 break;
         }
+
+        $teachers = [];
+        foreach ($data['teachers'] as $teacher) {
+            if (
+                get_config('booking', 'teachersshowemails')
+                || (
+                    get_config('booking', 'bookedteachersshowemails')
+                    && ($id == MOD_BOOKING_BO_COND_ALREADYBOOKED)
+                )
+            ) {
+                $teacher->email = str_replace('@', '&#64;', $teacher->email);
+            } else {
+                $teacher->email = false;
+            }
+
+            $teachers[] = (array)$teacher;
+        }
+        $data['teachers'] = $teachers;
 
         self::format_description($data['description']);
         $detailhtml = $OUTPUT->render_from_template('mod_booking/mobile/mobile_booking_option_details', $data);
@@ -226,7 +253,7 @@ class mobile {
             isset($data['courseid']) &&
             (int)$data['courseid'] > 0
         ) {
-            $linktocourse = 'moodlemobile://' . $CFG->wwwroot . '?redirect=/course/view.php?id=' . $data['courseid'];
+            $linktocourse = $CFG->wwwroot . '/course/view.php?id=' . $data['courseid'];
             if (get_config('booking', 'linktomoodlecourseonbookedbutton')) {
                 $data['linktomoodlecourseonbookedbutton'] = $linktocourse;
             } else {
@@ -310,7 +337,7 @@ class mobile {
 
         $cmid = $args['cmid'];
         $availablenavtabs = self::get_available_nav_tabs($cmid);
-        $whichview = self::set_active_nav_tabs($availablenavtabs, $args['whichview']);
+        $whichview = self::set_active_nav_tabs($availablenavtabs, $args['whichview'] ?? null);
 
         if (empty($cmid)) {
             throw new moodle_exception('nocmidselected', 'mod_booking');
@@ -353,7 +380,6 @@ class mobile {
         $settings = singleton_service::get_instance_of_booking_option_settings($recordid);
         $tmpoutputdata = $settings->return_booking_option_information();
         $tmpoutputdata['maxsessions'] = $maxdatabeforecollapsable;
-        $tmpoutputdata = $settings->return_booking_option_information();
         if (
             strlen(strip_tags($tmpoutputdata['description'])) >
             (int) get_config('booking', 'collapsedescriptionmaxlength')
@@ -564,7 +590,10 @@ class mobile {
         if ($configmobileviewoptions !== '') {
             $navtabs = explode(',', get_config('booking', 'mobileviewoptions'));
             foreach ($navtabs as $navtab) {
-                if (self::get_available_booking_options($navtab, $cmid)) {
+                if (
+                    !empty($navtab) &&
+                    self::get_available_booking_options($navtab, $cmid)
+                ) {
                     $selectednavlabelnames[] = [
                       'label' => $navtab,
                       'name' => $navlabelnames[$navtab],

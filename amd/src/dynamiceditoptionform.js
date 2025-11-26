@@ -76,7 +76,16 @@ export const init = (cmid, id, optionid, bookingid, copyoptionid, returnurl) => 
             window.location.href = returnurl;
         } else {
             // Just in case we have no returnurl.
-            dynamicForm.load([cmid, id, optionid, bookingid, copyoptionid, returnurl]);
+            dynamicForm.load(
+                {
+                    cmid: cmid,
+                    id: id,
+                    optionid: optionid,
+                    bookingid: bookingid,
+                    copyoptionid: copyoptionid,
+                    returnurl: returnurl
+                }
+            );
         }
     });
     dynamicForm.addEventListener(dynamicForm.events.SERVER_VALIDATION_ERROR, () => {
@@ -91,9 +100,9 @@ export const init = (cmid, id, optionid, bookingid, copyoptionid, returnurl) => 
         console.log('validation error');
     });
 
-    var checkbox1 = document.querySelector('[name="restrictanswerperiodopening"]');
-    var checkbox2 = document.querySelector('[name="restrictanswerperiodclosing"]');
-    var conditionalCheckbox = document.querySelector('[name="bo_cond_booking_time_sqlfiltercheck"]');
+    var checkbox1 = document.querySelector('[type="checkbox"][name="restrictanswerperiodopening"]');
+    var checkbox2 = document.querySelector('[type="checkbox"][name="restrictanswerperiodclosing"]');
+    var conditionalCheckbox = document.querySelector('[type="checkbox"][name="bo_cond_booking_time_sqlfiltercheck"]');
     let closest = conditionalCheckbox.closest('[class^="form-group row"],[class*=" fitem"]');
 
     dynamicForm.addEventListener('change', e => {
@@ -212,9 +221,11 @@ function showInvalidFeedback() {
             }
         }
     });
-    let firstelement = nonEmptyElements[0];
-    firstelement.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
-    });
+    if (nonEmptyElements.length > 0) {
+        let firstelement = nonEmptyElements[0];
+        firstelement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+        });
+    }
 }

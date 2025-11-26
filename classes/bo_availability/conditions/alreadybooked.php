@@ -27,7 +27,9 @@ namespace mod_booking\bo_availability\conditions;
 use mod_booking\bo_availability\bo_condition;
 use mod_booking\bo_availability\bo_info;
 use mod_booking\booking_option_settings;
+use mod_booking\local\modechecker;
 use mod_booking\singleton_service;
+use moodle_url;
 use MoodleQuickForm;
 
 defined('MOODLE_INTERNAL') || die();
@@ -86,8 +88,7 @@ class alreadybooked implements bo_condition {
      * @return bool True if available
      */
     public function is_available(booking_option_settings $settings, int $userid, bool $not = false): bool {
-
-        global $DB;
+        global $DB, $USER;
 
         // This is the return value. Not available to begin with.
         $isavailable = false;
@@ -99,6 +100,20 @@ class alreadybooked implements bo_condition {
 
         // If the user is not yet booked we return true.
         if (!isset($bookinginformation['iambooked'])) {
+            $isavailable = true;
+        }
+
+        $allanswers = $bookinganswer->get_users();
+        $currentanswer = $allanswers[$USER->id] ?? null;
+
+        // Get the real booking time.
+        $timebooked = (int) (empty($currentanswer) ) ? 0 : $currentanswer->timebooked;
+
+        // Check if multiple bookings are enabled and if the required time to wait before
+        // the next book is passed, then this condition does not blocks.
+        $ismultipbookingsoptionenable = $settings->jsonobject->multiplebookings ?? 0;
+        $allowtobookagainafter = $settings->jsonobject->allowtobookagainafter ?? 0;
+        if ($ismultipbookingsoptionenable && ($timebooked + $allowtobookagainafter) <= time()) {
             $isavailable = true;
         }
 
@@ -114,10 +129,10 @@ class alreadybooked implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }
@@ -162,7 +177,7 @@ class alreadybooked implements bo_condition {
 
         $isavailable = $this->is_available($settings, $userid, $not);
 
-        $description = $this->get_description_string($isavailable, $full, $settings);
+        $description = !$isavailable ? $this->get_description_string($isavailable, $full, $settings) : '';
 
         return [$isavailable, $description, MOD_BOOKING_BO_PREPAGE_NONE, MOD_BOOKING_BO_BUTTON_JUSTMYALERT];
     }
@@ -223,20 +238,24 @@ class alreadybooked implements bo_condition {
         } else {
             $label = $this->get_description_string(false, $full, $settings);
         }
+        $classes = $link !== '' ? 'bookinglinkbutton btn btn-primary' : 'alert alert-success';
+
+        $detaildots = self::detaildots($settings, $userid);
 
         return bo_info::render_button(
             $settings,
             $userid,
             $label,
-            $link !== '' ? 'bookinglinkbutton btn btn-primary' : 'alert alert-success',
+            $classes,
             false,
             $fullwidth,
-            'alert',
+            'button',
             'option',
             true,
             '',
             $link,
-            'fa-play'
+            'fa-play',
+            $detaildots
         );
     }
 
@@ -265,5 +284,46 @@ class alreadybooked implements bo_condition {
                 get_string('bocondalreadybookednotavailable', 'mod_booking');
         }
         return $description;
+    }
+
+    /**
+     * Check if detaildots should be displayed and return corresponding array for template.
+     *
+     * @param booking_option_settings $settings
+     * @param int $userid
+     *
+     * @return array
+     *
+     */
+    public static function detaildots($settings, $userid): array {
+        if (
+            !get_config('booking', 'showdetaildotsnextbookedalert')
+        ) {
+            return [];
+        }
+
+        $bookondetail = new bookondetail();
+        if ($bookondetail->is_available($settings, $userid)) {
+            return [];
+        }
+        global $PAGE;
+
+        if (!modechecker::is_ajax_or_webservice_request()) {
+            $returnurl = $PAGE->url->out();
+        } else {
+            $returnurl = '/';
+        }
+
+        $url = new moodle_url("/mod/booking/optionview.php", [
+            "optionid" => (int)$settings->id,
+            "cmid" => (int)$settings->cmid,
+            "userid" => (int)$userid,
+            'returnto' => 'url',
+            'returnurl' => $returnurl,
+        ]);
+
+        return [
+            'url' => $url->out(false),
+        ];
     }
 }

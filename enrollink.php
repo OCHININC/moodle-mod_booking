@@ -27,7 +27,11 @@ require_once(__DIR__ . '/../../config.php');
 require_once("lib.php");
 
 
-$erlid = required_param('erlid', PARAM_TEXT); // Course id.
+$erlid = optional_param('erlid', '', PARAM_TEXT); // Course id.
+
+if (empty($erlid)) {
+    redirect(new moodle_url('/'));
+}
 
 $enrollink = enrollink::get_instance($erlid);
 
@@ -35,6 +39,10 @@ $enrollink = enrollink::get_instance($erlid);
 $info = $enrollink->enrolment_blocking();
 if (!empty($info)) {
     $infostring = $enrollink->get_readable_info($info);
+    $PAGE->set_context(context_system::instance());
+    $PAGE->set_url('/mod/booking/enrollink.php', ['erlid' => $erlid]);
+    $output = $PAGE->get_renderer('mod_booking');
+    echo $OUTPUT->header();
     echo $output->render_from_template(
         'mod_booking/enrollink',
         [
@@ -43,7 +51,7 @@ if (!empty($info)) {
             ]
     );
 } else {
-    require_login();
+    require_login($courseid = 0, $autologinguest = true, $cm = null, $setwantsurltome = true);
 
     $PAGE->set_context(context_system::instance());
     $PAGE->set_url('/mod/booking/enrollink.php', ['erlid' => $erlid]);
@@ -53,6 +61,8 @@ if (!empty($info)) {
     global $USER;
     $info = $enrollink->enrol_user($USER->id);
     $courselink = $enrollink->get_courselink_url();
+    $bodetailslink = $enrollink->get_bookingdetailslink_url();
+    $title = $enrollink->get_bookingoptiontitle();
     $infostring = $enrollink->get_readable_info($info);
     echo $output->render_from_template(
         'mod_booking/enrollink',
@@ -60,7 +70,9 @@ if (!empty($info)) {
             'info' => $infostring,
             'error' => $info == "enrolmentexception" ? 1 : 0,
             'courselink' => $courselink ?? false,
-            ]
+            'bodetailslink' => $bodetailslink ?? false,
+            'namebookingoption' => $title,
+        ]
     );
 }
 

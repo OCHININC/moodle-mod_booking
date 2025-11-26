@@ -103,9 +103,9 @@ class renderer extends plugin_renderer_base {
                 ['type' => 'submit', 'name' => 'unsubscribe',
                     'value' => $this->page->theme->rarrow . ' ' . get_string('remove'),
                     'class' => 'actionbutton',
-                ]);
+            ]);
         }
-        $actioncell->text .= html_writer::end_tag('div', []);
+        $actioncell->text .= html_writer::end_tag('div');
         $actioncell->attributes['class'] = 'actions';
         $potentialcell = new html_table_cell();
         $potentialcell->text = $potentialuc->display(true);
@@ -597,6 +597,7 @@ class renderer extends plugin_renderer_base {
     public function render_col_price($data) {
         $o = '';
         $data = $data->export_for_template($this);
+        booking::convert_prices_to_number_format($data);
         $o .= $this->render_from_template('mod_booking/col_price', $data);
         return $o;
     }
@@ -646,6 +647,18 @@ class renderer extends plugin_renderer_base {
         $o = '';
         $data = $data->export_for_template($this);
         $o .= $this->render_from_template('mod_booking/semesters_holidays', $data);
+        return $o;
+    }
+
+    /**
+     * Render pricecategories form.
+     * @param object $data
+     * @return string
+     */
+    public function render_pricecategories($data) {
+        $o = '';
+        $data = $data->export_for_template($this);
+        $o .= $this->render_from_template('mod_booking/pricecategories', $data);
         return $o;
     }
 
@@ -751,6 +764,7 @@ class renderer extends plugin_renderer_base {
     public function render_bookit_price($data) {
         $o = '';
         $data = $data->export_for_template($this);
+        booking::convert_prices_to_number_format($data);
         $o .= $this->render_from_template('mod_booking/bookit_price', $data);
         return $o;
     }
@@ -803,6 +817,20 @@ class renderer extends plugin_renderer_base {
         $o = '';
         $data = $data->export_for_template($this);
         $o .= $this->render_from_template('mod_booking/view', $data);
+        return $o;
+    }
+    /**
+     * renders col_responsiblecontacts.
+     *
+     * @param object $data
+     *
+     * @return string
+     *
+     */
+    public function render_col_responsiblecontacts(object $data) {
+        $o = '';
+        $data = $data->export_for_template($this);
+        $o .= $this->render_from_template('mod_booking/col_responsiblecontact', $data);
         return $o;
     }
 }

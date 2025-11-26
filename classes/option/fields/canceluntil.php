@@ -28,6 +28,7 @@ use mod_booking\booking_option;
 use mod_booking\booking_option_settings;
 use mod_booking\option\fields_info;
 use mod_booking\option\field_base;
+use mod_booking\option\time_handler;
 use mod_booking\singleton_service;
 use MoodleQuickForm;
 use stdClass;
@@ -40,7 +41,6 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class canceluntil extends field_base {
-
     /**
      * This ID is used for sorting execution.
      * @var int
@@ -92,7 +92,8 @@ class canceluntil extends field_base {
         stdClass &$formdata,
         stdClass &$newoption,
         int $updateparam,
-        $returnvalue = null): array {
+        $returnvalue = null
+    ): array {
 
         // We store the information until when a booking option can be cancelled in the JSON.
         // So this has to happen BEFORE JSON is saved!
@@ -135,7 +136,8 @@ class canceluntil extends field_base {
 
         $mform->addElement('advcheckbox', 'canceluntilcheckbox', get_string('canceluntil', 'mod_booking'));
         $mform->disabledIf('canceluntilcheckbox', 'disablecancel', 'checked');
-        $mform->addElement('date_time_selector', 'canceluntil', '');
+        $mform->addElement('date_time_selector', 'canceluntil', '', time_handler::set_timeintervall());
+        $mform->setDefault('canceluntil', time_handler::prettytime(time()));
         $mform->disabledIf('canceluntil', 'canceluntilcheckbox');
         $mform->setType('canceluntil', PARAM_INT);
     }
@@ -185,7 +187,8 @@ class canceluntil extends field_base {
         field_base $self,
         $mockdata = '',
         string $key = '',
-        $value = ''): array {
+        $value = ''
+    ): array {
 
         if (!isset($self)) {
             return [];
@@ -219,13 +222,16 @@ class canceluntil extends field_base {
                 $oldvalue = "";
             }
 
-            if ($oldvalue != $newvalue
-                && !(empty($oldvalue) && empty($newvalue))) {
+            if (
+                $oldvalue != $newvalue
+                && !(empty($oldvalue) && empty($newvalue))
+            ) {
                 $changes = [
                     'changes' => [
                         'fieldname' => $classname,
                         'oldvalue' => $oldvalue,
                         'newvalue' => $newvalue,
+                        'formkey' => 'canceluntil',
                     ],
                 ];
             }

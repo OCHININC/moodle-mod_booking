@@ -26,9 +26,8 @@
 
  namespace mod_booking\bo_availability\conditions;
 
-use context_module;
 use mod_booking\bo_availability\bo_condition;
-use mod_booking\bo_availability\bo_info;
+use mod_booking\booking;
 use mod_booking\booking_option_settings;
 use mod_booking\price;
 use mod_booking\singleton_service;
@@ -50,7 +49,6 @@ require_once($CFG->dirroot . '/mod/booking/lib.php');
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class noshoppingcart implements bo_condition {
-
     /** @var int $id Standard Conditions have hardcoded ids. */
     public $id = MOD_BOOKING_BO_COND_NOSHOPPINGCART;
 
@@ -98,7 +96,6 @@ class noshoppingcart implements bo_condition {
 
         // If the user is not yet booked we return true.
         if ((empty($settings->jsonobject->useprice)) || class_exists('local_shopping_cart\shopping_cart')) {
-
             $isavailable = true;
         }
 
@@ -114,10 +111,10 @@ class noshoppingcart implements bo_condition {
      * Each function can return additional sql.
      * This will be used if the conditions should not only block booking...
      * ... but actually hide the conditons alltogether.
-     *
+     * @param int $userid
      * @return array
      */
-    public function return_sql(): array {
+    public function return_sql(int $userid = 0): array {
 
         return ['', '', '', [], ''];
     }

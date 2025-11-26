@@ -40,7 +40,6 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 abstract class field_base implements fields {
-
     /**
      * This ID is used for sorting execution.
      * @var int
@@ -135,7 +134,6 @@ abstract class field_base implements fields {
      * @throws \dml_exception
      */
     public static function save_data(stdClass &$formdata, stdClass &$option) {
-
     }
 
     /**
@@ -166,7 +164,6 @@ abstract class field_base implements fields {
      * @throws coding_exception
      */
     public static function definition_after_data(MoodleQuickForm &$mform, $formdata) {
-
     }
 
     /**
@@ -186,11 +183,40 @@ abstract class field_base implements fields {
     }
 
     /**
+     * Gets the full classname including namespace.
+     * @return string
+     * @throws coding_exception
+     */
+    public static function return_full_classname(): string {
+        return get_called_class();
+    }
+
+    /**
      * Every class can provide subfields.
      * @return array
      */
     public static function get_subfields() {
         return [];
+    }
+
+    /**
+     * Once all changes are collected, also those triggered in save data, this is a possible hook for the fields.
+     *
+     * @param array $changes
+     * @param object $data
+     * @param object $newoption
+     * @param object $originaloption
+     *
+     * @return void
+     *
+     */
+    public static function changes_collected_action(
+        array $changes,
+        object $data,
+        object $newoption,
+        object $originaloption
+    ) {
+        return;
     }
 
     /**
@@ -235,26 +261,33 @@ abstract class field_base implements fields {
             $self::set_data($mockdata, $settings);
 
             // Handling for textfields.
-            if (is_array($mockdata->{$key})
-                && isset($mockdata->{$key}['text'])) {
+            if (
+                is_array($mockdata->{$key})
+                && isset($mockdata->{$key}['text'])
+            ) {
                     $oldvalue = $mockdata->{$key}['text'];
-            } else if (is_object($mockdata->{$key})
-                && property_exists($mockdata->{$key}->text)) {
+            } else if (
+                is_object($mockdata->{$key})
+                && property_exists($mockdata->{$key}, 'text')
+            ) {
                 if (is_null($mockdata->{$key}->text)) {
                     $oldvalue = "";
                 } else {
                     $oldvalue = $mockdata->{$key}->text;
                 }
-
             } else { // Default handling.
                 $oldvalue = $mockdata->{$key};
             }
 
-            if (is_array($value)
-            && isset($value['text'])) {
+            if (
+                is_array($value)
+                && isset($value['text'])
+            ) {
                 $newvalue = $value['text'];
-            } else if (is_object($value)
-                && property_exists($value->text)) {
+            } else if (
+                is_object($value)
+                && property_exists($value, 'text')
+            ) {
                 if (is_null($value->text)) {
                     $newvalue = "";
                 } else {
@@ -264,13 +297,16 @@ abstract class field_base implements fields {
                 $newvalue = $value;
             }
 
-            if ($oldvalue != $newvalue
-                && !(empty($oldvalue) && empty($newvalue))) {
+            if (
+                $oldvalue != $newvalue
+                && !(empty($oldvalue) && empty($newvalue))
+            ) {
                 $changes = [
                     'changes' => [
                         'fieldname' => $classname,
                         'oldvalue' => $oldvalue,
                         'newvalue' => $newvalue,
+                        'formkey' => $key,
                     ],
                 ];
             }

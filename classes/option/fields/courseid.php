@@ -30,6 +30,8 @@ use mod_booking\local\connectedcourse;
 use mod_booking\option\fields_info;
 use mod_booking\option\field_base;
 use mod_booking\singleton_service;
+use coding_exception;
+use dml_exception;
 use moodle_exception;
 use MoodleQuickForm;
 use stdClass;
@@ -103,7 +105,7 @@ class courseid extends field_base {
 
         global $DB;
 
-        if (is_array($formdata->courseid)) {
+        if (isset($formdata->courseid) && is_array($formdata->courseid)) {
             $formdata->courseid = reset($formdata->courseid);
         }
 
@@ -181,41 +183,37 @@ class courseid extends field_base {
             'ajax' => 'mod_booking/form_courses_selector',
             'noselectionstring' => get_string('nocourseselected', 'mod_booking'),
             'valuehtmlcallback' => function ($value) {
-                if (isset($coursearray[$value])) {
-                    return $coursearray[$value];
-                } else {
-                    global $DB, $OUTPUT;
-                    // Check if the course is currently being duplicated.
+                global $DB, $OUTPUT;
+                // Check if the course is currently being duplicated.
+                $sql = "SELECT c.id, c.fullname, c.shortname
+                        FROM {course} c
+                        JOIN {backup_controllers} bc
+                        ON c.id = bc.itemid
+                        JOIN {task_adhoc} ta
+                        ON ta.customdata LIKE " . $DB->sql_concat("'%backupid%'", "bc.backupid", "'%'") .
+                        "WHERE bc.operation = 'restore' AND c.id = :courseid";
+                $params = ['courseid' => $value];
+                $duplicatingcourse = $DB->get_record_sql($sql, $params);
+
+                if (empty($duplicatingcourse)) {
+                    // Check if the course exists.
                     $sql = "SELECT c.id, c.fullname, c.shortname
                             FROM {course} c
-                            JOIN {backup_controllers} bc
-                            ON c.id = bc.itemid
-                            JOIN {task_adhoc} ta
-                            ON ta.customdata LIKE " . $DB->sql_concat("'%backupid%'", "bc.backupid", "'%'") .
-                            "WHERE bc.operation = 'restore' AND c.id = :courseid";
+                            WHERE c.id = :courseid";
                     $params = ['courseid' => $value];
-                    $duplicatingcourse = $DB->get_record_sql($sql, $params);
-
-                    if (empty($duplicatingcourse)) {
-                        // Check if the course exists.
-                        $sql = "SELECT c.id, c.fullname, c.shortname
-                                FROM {course} c
-                                WHERE c.id = :courseid";
-                        $params = ['courseid' => $value];
-                        $courserecord = $DB->get_record_sql($sql, $params);
-                        if (empty($courserecord)) {
-                            // The course does not exist.
-                            return get_string('nocourseselected', 'mod_booking');
-                        } else {
-                            // The course exists, so show it.
-                            return $OUTPUT->render_from_template(
-                                'mod_booking/form-course-selector-suggestion',
-                                $courserecord
-                            );
-                        }
+                    $courserecord = $DB->get_record_sql($sql, $params);
+                    if (empty($courserecord)) {
+                        // The course does not exist.
+                        return get_string('nocourseselected', 'mod_booking');
                     } else {
-                        return get_string('courseduplicating', 'mod_booking');
+                        // The course exists, so show it.
+                        return $OUTPUT->render_from_template(
+                            'mod_booking/form-course-selector-suggestion',
+                            $courserecord
+                        );
                     }
+                } else {
+                    return get_string('courseduplicating', 'mod_booking');
                 }
             },
         ];
@@ -223,9 +221,6 @@ class courseid extends field_base {
         $mform->addElement('autocomplete', 'courseid', get_string("connectedmoodlecourse", "booking"), [], $options);
         $mform->addHelpButton('courseid', 'connectedmoodlecourse', 'mod_booking');
         $mform->hideIf('courseid', 'chooseorcreatecourse', 'neq', 1);
-
-        $templatetags = get_config('booking', 'templatetags');
-        $tags = explode(',', $templatetags);
 
         $options = [
             'tags' => false,
@@ -246,6 +241,14 @@ class courseid extends field_base {
         );
         $mform->hideIf('coursetemplateid', 'chooseorcreatecourse', 'neq', 3);
         $mform->addHelpButton('coursetemplateid', 'createnewmoodlecoursefromtemplate', 'mod_booking');
+
+        $mform->addElement(
+            'advcheckbox',
+            'createnewmoodlecoursefromtemplatewithusers',
+            get_string("createnewmoodlecoursefromtemplatewithusers", "booking"),
+            0
+        );
+        $mform->hideIf('createnewmoodlecoursefromtemplatewithusers', 'chooseorcreatecourse', 'neq', 3);
     }
 
     /**
@@ -289,7 +292,11 @@ class courseid extends field_base {
 
             // If the setting to duplicate the Moodle course is turned on...
             // ... we duplicate it and use the ID of the new course copy.
-            if (get_config('booking', 'duplicatemoodlecourses') && !empty($data->oldcopyoptionid)) {
+            if (
+                get_config('booking', 'duplicatemoodlecourses')
+                && !empty($data->oldcopyoptionid)
+                && !empty($settings->courseid)
+            ) {
                 $newcourseid = self::copy_moodle_course($data->oldcopyoptionid);
             }
 

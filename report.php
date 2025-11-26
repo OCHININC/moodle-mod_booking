@@ -24,8 +24,9 @@
  */
 
 use mod_booking\bo_availability\conditions\customform;
-use mod_booking\booking_answers;
+use mod_booking\booking_answers\booking_answers;
 use mod_booking\booking_option;
+use mod_booking\option\fields\sharedplaces;
 use mod_booking\output\booked_users;
 use mod_booking\output\eventslist;
 use mod_booking\singleton_service;
@@ -50,6 +51,7 @@ $signinextrasessioncols = optional_param('signinextrasessioncols', -1, PARAM_INT
 $pdftitle = optional_param('pdftitle', 1, PARAM_INT);
 $addemptyrows = optional_param('addemptyrows', 0, PARAM_INT);
 $includeteachers = optional_param('includeteachers', 0, PARAM_INT);
+$saveasformat = optional_param('saveasformat', '', PARAM_TEXT);
 
 // Search.
 $searchdate = optional_param('searchdate', 0, PARAM_INT);
@@ -180,7 +182,7 @@ $bookingoption->get_url_params();
 $optionteachers = $bookingoption->get_teachers();
 
 // Paging.
-$paging = 50; // Currently hardcoded. We might need a new setting for this in a future release.
+$paging = 100; // Currently hardcoded. We might need a new setting for this in a future release.
 
 // Capability checks.
 $isteacher = booking_check_if_teacher($bookingoption->option);
@@ -194,6 +196,21 @@ $event = \mod_booking\event\report_viewed::create(
 );
 $event->trigger();
 
+if ($action == 'downloadsigninsheethtml') {
+    $pdfoptions = new stdClass();
+    $pdfoptions->orientation = $orientation;
+    $pdfoptions->orderby = $orderby;
+    $pdfoptions->title = $pdftitle;
+    $pdfoptions->sessions = $pdfsessions;
+    $pdfoptions->extrasessioncols = $signinextrasessioncols;
+    $pdfoptions->addemptyrows = $addemptyrows;
+    $pdfoptions->includeteachers = $includeteachers;
+    $pdfoptions->saveasformat = $saveasformat;
+    $pdf = new mod_booking\signinsheet\signinsheet_generator($pdfoptions, $bookingoption);
+    $pdf->prepare_html();
+    die();
+}
+
 if ($action == 'downloadsigninsheet') {
     $pdfoptions = new stdClass();
     $pdfoptions->orientation = $orientation;
@@ -205,6 +222,12 @@ if ($action == 'downloadsigninsheet') {
     $pdfoptions->includeteachers = $includeteachers;
     $pdf = new mod_booking\signinsheet\signinsheet_generator($pdfoptions, $bookingoption);
     $pdf->download_signinsheet();
+    die();
+}
+
+if ($action == 'downloadchecklist') {
+    $pdf = new mod_booking\checklist\checklist_generator($bookingoption);
+    $pdf->generate_pdf();
     die();
 }
 
@@ -235,7 +258,7 @@ if (
     $continue->params($confirmarray);
     $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
     $ba = singleton_service::get_instance_of_booking_answers($settings);
-    $booked = booking_answers::count_places($ba->usersonlist);
+    $booked = booking_answers::count_places($ba->get_usersonlist());
     $title = $settings->get_title_with_prefix();
     if ($booked > 0) {
         $title .= ' (' . get_string('xusersarebooked', 'booking', $booked) . ')';
@@ -303,12 +326,10 @@ $tableallbookings->show_download_buttons_at([TABLE_P_BOTTOM]);
 $tableallbookings->no_sorting('selected');
 $tableallbookings->no_sorting('rating');
 $tableallbookings->no_sorting('indexnumber');
+$tableallbookings->no_sorting('certificate');
+$tableallbookings->no_sorting('allusercertificates');
 
 if (!$tableallbookings->is_downloading()) {
-    if ($action == 'postcustomreport') {
-        $bookingoption->printcustomreport();
-    }
-
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && confirm_sesskey()) {
         $allselectedusers = [];
 
@@ -428,7 +449,9 @@ if (!$tableallbookings->is_downloading()) {
                 $bookingoption->option
             ) || has_capability('mod/booking:readresponses', $context))
         ) {
-            booking_activitycompletion($allselectedusers, $bookingoption->booking->settings, $cm->id, $optionid);
+            $bookingoption->toggle_users_completion($allselectedusers);
+            // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+            /* booking_activitycompletion($allselectedusers, $bookingoption->booking->settings, $cm->id, $optionid); */
             redirect(
                 $url,
                 (empty($bookingoption->option->notificationtext) ? get_string(
@@ -599,10 +622,8 @@ if (!$tableallbookings->is_downloading()) {
                 $headers[] = get_string('completed', 'mod_booking');
                 break;
             case 'status':
-                if ($bookingoption->booking->settings->enablepresence) {
-                    $columns[] = 'status';
-                    $headers[] = get_string('presence', 'mod_booking');
-                }
+                $columns[] = 'status';
+                $headers[] = get_string('presence', 'mod_booking');
                 break;
             case 'rating':
                 if ($bookingoption->booking->settings->assessed != RATING_AGGREGATE_NONE) {
@@ -671,6 +692,22 @@ if (!$tableallbookings->is_downloading()) {
                 $columns[] = 'currency';
                 $headers[] = get_string('currency', 'local_shopping_cart');
                 break;
+            case 'email':
+                $columns[] = 'email';
+                $headers[] = get_string('email', 'mod_booking');
+                break;
+            case 'certificate':
+                if (booking_option::get_value_of_json_by_key($optionid, 'certificate')) {
+                    $headers[] = get_string('certificatecolheader', 'mod_booking');
+                    $columns[] = 'certificate';
+                }
+                break;
+            case 'allusercertificates':
+                if (booking_option::get_value_of_json_by_key($optionid, 'certificate')) {
+                    $headers[] = get_string('allusercertificates', 'mod_booking');
+                    $columns[] = 'allusercertificates';
+                }
+                break;
         }
     }
     $customfields = '';
@@ -692,6 +729,11 @@ if (!$tableallbookings->is_downloading()) {
     $customform = customform::return_formelements($settings);
 
     foreach ($customform as $counter => $customformfield) {
+        if ($customformfield->formtype === 'enrolusersaction') {
+            $columns[] = 'enrollink';
+            $headers[] = get_string('enrollink', 'booking');
+        }
+
         $label = !empty($customformfield->label) ? $customformfield->label : 'label_' . $counter;
         $columns[] = 'formfield_' . $counter;
         $headers[] = format_string($label);
@@ -712,36 +754,101 @@ if (!$tableallbookings->is_downloading()) {
         $sqlvalues = array_merge($sqlvalues, $groupparams);
     }
 
-    if ($CFG->version >= 2021051700) {
-        // This only works in Moodle 3.11 and later.
-        $mainuserfields = \core_user\fields::for_name()->get_sql('u')->selects;
-        $mainuserfields = trim($mainuserfields, ', ');
-    } else {
-        // This is only here to support Moodle versions earlier than 3.11.
-        $mainuserfields = get_all_user_name_fields(true, 'u');
-    }
+    $mainuserfields = \core_user\fields::for_name()->get_sql('u')->selects;
+    $mainuserfields = trim($mainuserfields, ', ');
+
     if (class_exists('local_shopping_cart\shopping_cart')) {
         $shoppingcartfields = ",
             s2.price price,
             s2.currency currency ";
         $shoppingcartfrom = "
-        LEFT JOIN ( SELECT itemid,price,userid, currency FROM {local_shopping_cart_history} sch
-            WHERE itemid = :shitemid AND componentname LIKE 'mod_booking'
-                AND paymentstatus = 2 ORDER BY timecreated LIMIT 1)
-                as s2 ON s2.itemid = ba.optionid AND s2.userid = ba.userid ";
-        $sqlvalues['shitemid'] = $sqlvalues['optionid'];
+            LEFT JOIN (
+                SELECT sch.itemid, sch.price, sch.userid, sch.currency, sch.timecreated
+                FROM {local_shopping_cart_history} sch
+                JOIN (
+                    SELECT userid, MAX(timecreated) AS timecreated
+                    FROM {local_shopping_cart_history}
+                    WHERE itemid = :shitemid1
+                    AND componentname = 'mod_booking'
+                    AND paymentstatus = 2
+                    GROUP BY userid
+                ) latest
+                ON sch.userid = latest.userid AND sch.timecreated = latest.timecreated
+                WHERE itemid = :shitemid2
+                AND componentname LIKE 'mod_booking'
+                AND paymentstatus = 2
+            ) AS s2 ON s2.itemid = ba.optionid AND s2.userid = ba.userid ";
+        $sqlvalues['shitemid1'] = $sqlvalues['optionid'];
+        $sqlvalues['shitemid2'] = $sqlvalues['optionid'];
     } else {
         $shoppingcartfields = "";
         $shoppingcartfrom = "";
     }
+    if (class_exists('tool_certificate\certificate')) {
+        $certificatefields = ", cert.certificate";
+        $databasetype = $DB->get_dbfamily();
+        switch ($databasetype) {
+            case 'postgres':
+                $certificatefrom = "
+                LEFT JOIN (
+                    SELECT
+                        tci.userid,
+                        (tci.data::jsonb ->> 'bookingoptionid')::int AS optionid,
+                        json_agg(
+                            json_build_object(
+                                'id', tci.id,
+                                'code', tci.code,
+                                'expires', tci.expires,
+                                'data', data,
+                                'timecreated', timecreated
+                            )
+                        ) AS certificate
+                    FROM
+                        {tool_certificate_issues} tci
+                    GROUP BY
+                        tci.userid, optionid
+                ) cert ON cert.optionid = ba.optionid AND cert.userid = ba.userid
+                ";
 
-    // ALL USERS - START To make compatible MySQL and PostgreSQL - http://hyperpolyglot.org/db.
+                break;
+            case 'mysql':
+                    $certificatefrom = "
+                    LEFT JOIN (
+                        SELECT
+                            tci.userid,
+                            CAST(JSON_UNQUOTE(JSON_EXTRACT(tci.data, '$.bookingoptionid')) AS UNSIGNED) AS optionid,
+                            JSON_ARRAYAGG(
+                                JSON_OBJECT(
+                                    'id', tci.id,
+                                    'code', tci.code,
+                                    'expires', tci.expires,
+                                    'data', tci.data,
+                                    'timecreated', tci.timecreated
+                                )
+                            ) AS certificate
+                        FROM
+                            {tool_certificate_issues} tci
+                        GROUP BY
+                            tci.userid, optionid
+                    ) cert ON cert.optionid = ba.optionid AND cert.userid = ba.userid
+                    ";
+                break;
+            default:
+                throw new \moodle_exception('Unsupported database type for JSON key extraction.');
+        }
+    } else {
+            $certificatefields = "";
+            $certificatefrom = "";
+    }
+
+    // ALL USERS.
     $fields = 'ba.id, ' . $mainuserfields . ',
             ba.optionid,
             u.username,
             u.institution,
             u.city,
             u.department,
+            u.email,
             ba.completed,
             ba.status,
             ba.timecreated,
@@ -750,13 +857,19 @@ if (!$tableallbookings->is_downloading()) {
             ba.notes,
             ba.places,
             \'\' otheroptions,
-            ba.numrec' . $customfields . $shoppingcartfields;
+            ba.numrec' . $customfields . $shoppingcartfields . $certificatefields;
     $from = ' {booking_answers} ba
             JOIN {user} u ON u.id = ba.userid
             JOIN {booking_options} bo ON bo.id = ba.optionid
-            LEFT JOIN {booking_options} otherbookingoption ON otherbookingoption.id = ba.frombookingid ' . $shoppingcartfrom;
-    $where = ' ba.optionid = :optionid
-             AND ba.waitinglist < 2 ' . $addsqlwhere;
+            LEFT JOIN {booking_options} otherbookingoption ON otherbookingoption.id = ba.frombookingid ' . $shoppingcartfrom
+            . $certificatefrom;
+
+    // With the shared places feature, we get more than one option.
+    // Therefore, we use IN.
+    // First, we see if this option shares with any other option.
+    $spinorequal = sharedplaces::return_shared_places_where_sql($optionid, $sqlvalues);
+    $where = " ba.optionid $spinorequal ";
+    $where .= ' AND ba.waitinglist < 2 ' . $addsqlwhere;
 
     $tableallbookings->set_sql($fields, $from, $where, $sqlvalues);
 
@@ -883,7 +996,8 @@ if (!$tableallbookings->is_downloading()) {
 
     // Button to download signin sheet.
     $actionbuttonstop .=
-        '<button class="btn btn-primary btn-sm mr-2" id="downloadsigninsheet-top-btn">
+        '<button class="btn btn-primary btn-sm mr-2" id="downloadsigninsheet-top-btn" buttonaction='
+        . $bookingoption->booking->settings->toporientation . '>
             <i class="fa fa-download fa-fw" aria-hidden="true"></i>&nbsp;' .
             get_string('signinsheetdownload', 'mod_booking') .
         '</button>';
@@ -1126,17 +1240,6 @@ if (!$tableallbookings->is_downloading()) {
         ['id' => 'sign_in_sheet_download']
     );
 
-    if (!empty($bookingoption->booking->settings->customtemplateid)) {
-        echo ' | ' . html_writer::link(
-            new moodle_url(
-                '/mod/booking/report.php',
-                ['id' => $cm->id, 'optionid' => $optionid, 'action' => 'postcustomreport']
-            ),
-            get_string('customdownloadreport', 'mod_booking'),
-            ['target' => '_blank']
-        );
-    }
-
     echo "</div>";
 
     echo "<script>
@@ -1150,11 +1253,13 @@ if (!$tableallbookings->is_downloading()) {
     $renderer = $PAGE->get_renderer('mod_booking');
     echo $renderer->render_signin_pdfdownloadform($signinform);
 
-    $eventslist = new eventslist($optionid, ['\mod_booking\event\message_sent']);
-    $eventslist->icon = 'fa fa-envelope-o';
-    $eventslist->title = get_string('showmessages', 'mod_booking');
-
-    echo $OUTPUT->render_from_template('mod_booking/eventslist', (array) $eventslist);
+    // Messages can only be view by users with viewreports permission.
+    if (has_capability('mod/booking:viewreports', $context)) {
+        $eventslist = new eventslist($optionid, ['\mod_booking\event\message_sent']);
+        $eventslist->icon = 'fa fa-envelope-o';
+        $eventslist->title = get_string('showmessages', 'mod_booking');
+        echo $OUTPUT->render_from_template('mod_booking/eventslist', (array) $eventslist);
+    }
 
     // We call the template render to display how many users are currently reserved.
     $data = new booked_users('option', $optionid, false, false, false, false, true);
@@ -1166,7 +1271,9 @@ if (!$tableallbookings->is_downloading()) {
             '<i class="fa fa-users" aria-hidden="true"></i>' . get_string('deletedusers', 'mod_booking'),
             [
                 'data-toggle' => "collapse",
-                'href' => "#collapseDeletedlist",
+                'data-target' => "#collapseDeletedlist",
+                'data-bs-toggle' => "collapse",
+                'data-bs-target' => "#collapseDeletedlist",
                 'role' => "button",
                 'aria-expanded' => "false",
                 'aria-controls' => "collapseDeletedlist",
@@ -1196,7 +1303,7 @@ if (!$tableallbookings->is_downloading()) {
     if ($userprofilefields) {
         foreach ($userprofilefields as $profilefield) {
             $columns[] = "cust" . strtolower($profilefield->shortname);
-            $headers[] = $profilefield->name;
+            $headers[] = format_string($profilefield->name);
             $customfields .= ", (SELECT " . $DB->sql_concat('uif.datatype', "'|'", 'uid.data') . " as custom
             FROM {user_info_data} uid
             LEFT JOIN {user_info_field}  uif ON uid.fieldid = uif.id
@@ -1231,11 +1338,25 @@ if (!$tableallbookings->is_downloading()) {
             s2.price price,
             s2.currency currency ";
         $shoppingcartfrom = "
-        LEFT JOIN ( SELECT itemid,price,userid, currency FROM {local_shopping_cart_history} sch
-            WHERE itemid = :shitemid AND componentname LIKE 'mod_booking'
-                AND paymentstatus = 2 ORDER BY timecreated LIMIT 1)
-                as s2 ON s2.itemid = ba.optionid AND s2.userid = ba.userid ";
-        $sqlvalues['shitemid'] = $sqlvalues['optionid'];
+        LEFT JOIN (
+            SELECT sch.itemid, sch.price, sch.userid, sch.currency, sch.timecreated
+            FROM {local_shopping_cart_history} sch
+            JOIN (
+                SELECT userid, MAX(timecreated) AS timecreated
+                FROM {local_shopping_cart_history}
+                WHERE itemid = :shitemid1
+                AND componentname = 'mod_booking'
+                AND paymentstatus = 2
+                GROUP BY userid
+            ) latest
+            ON sch.userid = latest.userid AND sch.timecreated = latest.timecreated
+            WHERE itemid = :shitemid2
+            AND componentname LIKE 'mod_booking'
+            AND paymentstatus = 2
+        ) AS s2
+        ON s2.itemid = ba.optionid AND s2.userid = ba.userid ";
+        $sqlvalues['shitemid1'] = $sqlvalues['optionid'];
+        $sqlvalues['shitemid2'] = $sqlvalues['optionid'];
     } else {
         $shoppingcartfields = "";
         $shoppingcartfrom = "";
@@ -1269,7 +1390,11 @@ if (!$tableallbookings->is_downloading()) {
             JOIN {booking_options} bo ON bo.id = ba.optionid' . $shoppingcartfrom;
 
     if (!get_config('booking', 'alloptionsinreport')) {
-        $individualbookingoption = " ba.optionid = :optionid AND ";
+        // With the shared places feature, we get more than one option.
+        // Therefore, we use IN.
+        // First, we see if this option shares with any other option.
+        $spinorequal = sharedplaces::return_shared_places_where_sql($optionid, $sqlvalues);
+        $individualbookingoption = " ba.optionid $spinorequal AND ";
     } else {
         $individualbookingoption = " bo.bookingid = :bookingid AND ";
         $sqlvalues['bookingid'] = (int)$bookingoption->bookingid;

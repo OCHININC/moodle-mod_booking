@@ -47,7 +47,6 @@ use stdClass;
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class modal_editteacherdescription extends dynamic_form {
-
     /**
      * Get context for dynamic submission.
      * @return context
@@ -149,7 +148,7 @@ class modal_editteacherdescription extends dynamic_form {
 
         $mform->addElement('hidden', 'teacherid');
 
-        $mform->addElement('editor', 'description_editor', get_string('description', 'mod_booking'), ['rows' => 10]);
+        $mform->addElement('editor', 'description_editor', get_string('teacherdescription', 'mod_booking'), ['rows' => 10]);
         $mform->setType('description', PARAM_CLEANHTML);
     }
 

@@ -25,12 +25,12 @@
 namespace mod_booking\option\fields;
 
 use mod_booking\booking_option_settings;
-use mod_booking\option\fields;
 use mod_booking\option\fields_info;
 use mod_booking\option\field_base;
 use mod_booking\singleton_service;
 use MoodleQuickForm;
 use stdClass;
+use dml_exception;
 
 /**
  * Class to handle one property of the booking_option_settings class.
@@ -99,6 +99,35 @@ class invisible extends field_base {
         $instance = new invisible();
         $changes = $instance->check_for_changes($formdata, $instance);
 
+        // Set the timemadevisible timestamp.
+        $change = reset($changes) ?? [];
+        $optionid = $formdata->optionid ?? $formdata->id ?? 0;
+        if (empty($optionid)) {
+            // The option is new.
+            $newoption->timemadevisible = time();
+        } else if (
+            isset($change['fieldname'])
+            && isset($change['oldvalue'])
+            && isset($change['newvalue'])
+            && $change['fieldname'] == 'invisible'
+            && in_array($change['oldvalue'], [1, 2]) // Was invisible.
+            && $change['newvalue'] == 0 // Was set to visible.
+        ) {
+            // The option was set from invisible to visible.
+            $newoption->timemadevisible = time();
+        } else {
+            // In all other cases, we use the timecreated value.
+            $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+            if (empty($settings->timemadevisible)) {
+                if (!empty($settings->timecreated)) {
+                    $newoption->timemadevisible = $settings->timecreated;
+                } else {
+                    // Fallback if timecreated is 0.
+                    $newoption->timemadevisible = $settings->timemodified;
+                }
+            }
+        }
+
         return $changes;
     }
 
@@ -124,6 +153,8 @@ class invisible extends field_base {
             fields_info::add_header_to_mform($mform, self::$header);
         }
 
+        $optionid = $formdata['id'] ?? $formdata['optionid'] ?? 0;
+
         // Visibility.
         $visibilityoptions = [
             0 => get_string('optionvisible', 'mod_booking'),
@@ -134,6 +165,22 @@ class invisible extends field_base {
         $mform->setType('invisible', PARAM_INT);
         $mform->setDefault('invisible', 0);
         $mform->addHelpButton('invisible', 'optionvisibility', 'mod_booking');
+
+        if (!empty($optionid)) {
+            $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
+            $timemadevisible = $settings->timemadevisible ?? 0;
+            if (!empty($timemadevisible)) {
+                if ($settings->invisible == 0) {
+                    $readabletimemadevisible = userdate($timemadevisible, get_string('strftimedaydatetime', 'langconfig'));
+                    $mform->addElement(
+                        'html',
+                        '<div class="bookingoption-form-timemadevisible text-muted small ml-4 mb-3">'
+                        . get_string('timemadevisible', 'mod_booking') . ": "
+                        . $readabletimemadevisible . '</div>'
+                    );
+                }
+            }
+        }
     }
 
     /**

@@ -23,12 +23,25 @@
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+use core\event\base;
 use core\event\course_module_updated;
+use local_shopping_cart\event\item_added;
+use local_wunderbyte_table\event\template_switched;
+use local_wunderbyte_table\wunderbyte_table;
 use mod_booking\booking;
 use mod_booking\booking_option;
 use mod_booking\booking_rules\rules_info;
 use mod_booking\calendar;
 use mod_booking\elective;
+use mod_booking\event\booking_debug;
+use mod_booking\event\bookinganswer_presencechanged;
+use mod_booking\event\bookinganswer_notesedited;
+use mod_booking\event\bookingoption_booked;
+use mod_booking\local\checkanswers\checkanswers;
+use mod_booking\local\mobile\customformstore;
+use mod_booking\local\respondapi\handlers\respondapi_handler;
+use mod_booking\option\fields\certificate;
+use mod_booking\output\view;
 use mod_booking\singleton_service;
 
 /**
@@ -80,6 +93,7 @@ class mod_booking_observer {
         $params = ['userid' => $event->relateduserid];
 
         $DB->delete_records_select('booking_answers', 'userid = :userid', $params);
+        $DB->delete_records_select('booking_history', 'userid = :userid', $params);
         $DB->delete_records_select('booking_teachers', 'userid = :userid', $params);
         $DB->delete_records_select('booking_optiondates_teachers', 'userid = :userid', $params);
         cache_helper::purge_by_event('setbackcachedteachersjournal');
@@ -118,6 +132,19 @@ class mod_booking_observer {
                 );
             }
         }
+
+        // When a user is unenrolled from a course, check if we need to delete her answer.
+        $userid = $event->relateduserid; // The user who was unenrolled.
+        $courseid = $event->courseid;
+
+        $context = context_course::instance($courseid) ?? context_system::instance();
+
+        checkanswers::create_bookinganswers_check_tasks(
+            $context->id, // System context, so everywhere.
+            checkanswers::CHECK_COURSE_ENROLLMENT,
+            checkanswers::ACTION_DELETE,
+            $userid
+        );
     }
 
     /**
@@ -152,6 +179,25 @@ class mod_booking_observer {
                 $DB->delete_records('booking_userevents', ['id' => $record->id]);
             }
         };
+
+        $optionid = $event->objectid;
+        cache_helper::invalidate_by_event('setbackoptionsanswers', [$optionid]);
+    }
+
+    /**
+     * Checkout completed event.
+     *
+     * @param \local_shopping_cart\event\checkout_completed $event
+     * @throws dml_exception
+     */
+    public static function checkout_completed(\local_shopping_cart\event\checkout_completed $event) {
+        // We need this to correctly update receipts for installment payments.
+        if (
+            ($event->other['componentname'] ?? '') == 'mod_booking'
+            && $event->other['area'] == 'option'
+        ) {
+            cache_helper::invalidate_by_event('setbackoptionsanswers', [$event->other['itemid']]);
+        }
     }
 
     /**
@@ -172,7 +218,7 @@ class mod_booking_observer {
             $bookingoption = singleton_service::get_instance_of_booking_option($settings->cmid, $optionid);
             $bookinganswer = singleton_service::get_instance_of_booking_answers($settings);
 
-            foreach ($bookinganswer->users as $user) {
+            foreach ($bookinganswer->get_users() as $user) {
                 /* Third param $bookingoptioncancel = true is important,
                 so we do not trigger bookinganswer_cancelled
                 and send no extra cancellation mails to each user.
@@ -183,6 +229,8 @@ class mod_booking_observer {
                 calendar::delete_booking_userevents_for_option($optionid, $user->id);
             }
         };
+        $optionid = $event->objectid;
+        booking_option::purge_cache_for_option($optionid);
     }
 
     /**
@@ -299,19 +347,42 @@ class mod_booking_observer {
     }
 
     /**
+     * Booking option date deleted.
+     *
+     * @param \mod_booking\event\bookingoptiondate_deleted $event
+     */
+    public static function bookingoptiondate_deleted(\mod_booking\event\bookingoptiondate_deleted $event) {
+        // Implement if necessary.
+    }
+
+    /**
      * When a booking option is completed, we send a mail to the user (as long as sendmail is activated).
      *
      * @param \mod_booking\event\bookingoption_completed $event
      */
     public static function bookingoption_completed(\mod_booking\event\bookingoption_completed $event) {
 
+        global $CFG;
+        require_once($CFG->dirroot . '/mod/booking/lib.php');
+
         $optionid = $event->objectid;
         $cmid = $event->other['cmid'];
-        $selecteduserid = $event->relateduserid;
 
         $bookingoption = singleton_service::get_instance_of_booking_option($cmid, $optionid);
+        $selecteduserid = $event->relateduserid;
 
-        if (empty($bookingoption->booking->settings->sendmail)) {
+        // Here, we check if the activity has to be completed for the concerned users.
+        booking_activitycompletion(
+            [$selecteduserid],
+            $bookingoption->booking->settings,
+            $cmid,
+            $optionid
+        );
+
+        if (
+            empty($bookingoption->booking->settings->sendmail)
+            || !get_config('booking', 'uselegacymailtemplates')
+        ) {
             // If sendmail is not set or not active, we don't do anything.
             return;
         }
@@ -353,9 +424,6 @@ class mod_booking_observer {
             // phpcs:ignore Squiz.PHP.CommentedOutCode.Found
             /* new calendar($tmpcmid->id, $value->id, 0, calendar::MOD_BOOKING_TYPEOPTION); */
 
-            // phpcs:ignore moodle.Commenting.TodoComment.MissingInfoInline
-            // TODO: We have to re-write this function so all calendar entries of optiondates will get updated correctly.
-
             $allteachers = $DB->get_records_sql(
                 "SELECT userid FROM {booking_teachers} WHERE optionid = ? AND calendarid > 0",
                 [$value->id]
@@ -365,48 +433,6 @@ class mod_booking_observer {
                 new calendar($tmpcmid->id, $value->id, $valuet->userid, calendar::MOD_BOOKING_TYPETEACHERUPDATE);
             }
         }
-    }
-
-    /**
-     * When we add teacher to booking option, we also add calendar event to their calendar.
-     *
-     * @param \mod_booking\event\teacher_added $event
-     */
-    public static function teacher_added(\mod_booking\event\teacher_added $event) {
-        $optionid = $event->objectid;
-        if (empty($optionid)) {
-            return;
-        }
-        $teacherid = $event->relateduserid;
-        $cmid = $event->contextinstanceid;
-
-        // For templates, we do not create calendar events for teachers (fixes #766).
-        if (empty($cmid)) {
-            return;
-        }
-
-        $settings = singleton_service::get_instance_of_booking_option_settings($optionid);
-
-        // Create calendar events for the newly added teacher.
-        foreach ($settings->sessions as $session) {
-            new calendar(
-                $cmid,
-                $optionid,
-                $teacherid,
-                calendar::MOD_BOOKING_TYPEOPTIONDATE,
-                $session->id,
-                1
-            );
-        }
-    }
-
-    /**
-     * When teacher is removed from booking option we delete their calendar records.
-     *
-     * @param \mod_booking\event\teacher_removed $event
-     */
-    public static function teacher_removed(\mod_booking\event\teacher_removed $event) {
-        new calendar($event->contextinstanceid, $event->objectid, $event->relateduserid, calendar::MOD_BOOKING_TYPETEACHERREMOVE);
     }
 
     /**
@@ -437,7 +463,18 @@ class mod_booking_observer {
         rules_info::collect_rules_for_execution($event);
         if (PHPUNIT_TEST) {
             // Process after every event when unit testing.
-            rules_info::filter_rules_and_execute();
+            // To avoid infinite loops, we need a counter.
+            $counter = 0;
+            while (
+                (count(rules_info::$rulestoexecute) > 0
+                || count(rules_info::$eventstoexecute) > 0)
+                && $counter < 10
+            ) {
+                rules_info::filter_rules_and_execute();
+
+                rules_info::events_to_execute();
+                $counter++;
+            }
         }
     }
 
@@ -450,20 +487,51 @@ class mod_booking_observer {
      * @throws moodle_exception
      */
     public static function course_completed(\core\event\course_completed $event) {
-        global $DB;
+        global $DB, $CFG;
 
         // Check if there is an associated booking_answer with status 'booked' for the userid and courseid.
-        $sql = 'SELECT ba.userid, bo.courseid
+        $sql = 'SELECT ba.id, ba.userid, bo.courseid, ba.optionid, ba.completed
                 FROM {booking_answers} ba
                 JOIN {booking_options} bo
                 ON ba.optionid = bo.id
                 WHERE ba.userid = :userid AND ba.waitinglist = 0 AND bo.courseid = :courseid';
         $params = ['userid' => $event->relateduserid, 'courseid' => $event->courseid];
-
+        if (get_config('booking', 'bookingdebugmode')) {
+            $event = booking_debug::create([
+                'objectid' => $event->courseid,
+                'context' => context_system::instance(),
+                'relateduserid' => $event->relateduserid,
+                'other' => [
+                    'eventparams' => json_encode($event),
+                ],
+            ]);
+            $event->trigger();
+        }
         // Only execute if there are associated booking_answers.
         if ($bookedanswers = $DB->get_records_sql($sql, $params)) {
             // Call the enrolment function.
             elective::enrol_booked_users_to_course();
+        }
+        if (get_config('booking', 'bookingdebugmode')) {
+            $event = booking_debug::create([
+                'objectid' => $event->courseid,
+                'context' => context_system::instance(),
+                'relateduserid' => $event->relateduserid,
+                'other' => [
+                    'bookedanswers' => json_encode($bookedanswers),
+                ],
+            ]);
+            $event->trigger();
+        }
+        if (!empty($bookedanswers) && get_config('booking', 'automaticbookingoptioncompletion')) {
+            require_once($CFG->dirroot . '/mod/booking/lib.php');
+            foreach ($bookedanswers as $bookedanswer) {
+                $settings = singleton_service::get_instance_of_booking_option_settings($bookedanswer->optionid);
+                $bookingoption = singleton_service::get_instance_of_booking_option($settings->cmid, $settings->id);
+                if (empty($bookedanswer->completed)) {
+                    $bookingoption->toggle_user_completion($bookedanswer->userid);
+                }
+            }
         }
     }
 
@@ -483,5 +551,174 @@ class mod_booking_observer {
                 booking::purge_cache_for_booking_instance_by_cmid($cm->id);
             }
         }
+    }
+
+    /**
+     * React on removal of group members and purge singleton & caches.
+     *
+     * @param base $event
+     *
+     * @return void
+     *
+     */
+    public static function group_membership_changed(base $event) {
+
+        // Now we check this booking instance to see if users lost their access.
+        $context = context_course::instance($event->courseid);
+        checkanswers::create_bookinganswers_check_tasks(
+            $context->id,
+            checkanswers::CHECK_CM_VISIBILITY,
+            checkanswers::ACTION_DELETE,
+            $event->relateduserid
+        );
+    }
+
+    /**
+     * React on template_switched which is triggered by template switcher.
+     *
+     * @param template_switched $event
+     */
+    public static function template_switched(template_switched $event) {
+        $data = $event->get_data();
+        $encodedtable = $data["other"]["tablecachehash"];
+        $template = $data["other"]["template"];
+        $viewparam = $data["other"]["viewparam"];
+        // Only apply this for Booking templates!
+        if (
+            !empty($encodedtable)
+            && in_array($template, [
+                'mod_booking/table_list',
+                'mod_booking/table_cards',
+            ])
+        ) {
+            $table = wunderbyte_table::instantiate_from_tablecache_hash($encodedtable);
+            $columns = array_keys($table->columns);
+            unset($columns['id']);
+
+            // Important: Unset old template data, before switching!
+            $table->unset_template_data();
+
+            switch ($viewparam) {
+                case 1: // MOD_BOOKING_VIEW_PARAM_CARDS.
+                    view::generate_table_for_cards($table, $columns);
+                    break;
+                case 2: // MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT.
+                    $table->set_template_data('showheaderimageleft', true);
+                    view::generate_table_for_list($table, $columns);
+                    break;
+                case 3: // MOD_BOOKING_VIEW_PARAM_LIST_IMG_RIGHT.
+                    $table->set_template_data('showheaderimageright', true);
+                    view::generate_table_for_list($table, $columns);
+                    break;
+                case 4: // MOD_BOOKING_VIEW_PARAM_LIST_IMG_LEFT_HALF.
+                    $table->set_template_data('showheaderimagelefthalf', true);
+                    view::generate_table_for_list($table, $columns);
+                    break;
+                case 0: // MOD_BOOKING_VIEW_PARAM_LIST.
+                default:
+                    $table->set_template_data('noheaderimage', true);
+                    view::generate_table_for_list($table, $columns);
+                    break;
+            }
+            $table->return_encoded_table(true);
+        }
+    }
+
+    /**
+     * React on the bookinganswer_presencechanged event.
+     * @param bookinganswer_presencechanged $event
+     * @return void
+     */
+    public static function bookinganswer_presencechanged(bookinganswer_presencechanged $event) {
+        $data = $event->get_data();
+        if ($data['other']['presencenew'] == $data['other']['presenceold']) {
+            return;
+        }
+        if ($data['other']['presencenew'] == get_config('booking', 'presencestatustoissuecertificate')) {
+            certificate::issue_certificate($data['objectid'], $data['relateduserid']);
+        }
+    }
+
+    /**
+     * React on the bookinganswer_notesedited event.
+     * @param bookinganswer_notesedited $event
+     * @return void
+     */
+    public static function bookinganswer_notesedited(bookinganswer_notesedited $event) {
+        // In the future, we might want to do something here.
+        // For now, we just return.
+        return;
+    }
+
+    /**
+     * React on the item added event from local shoppingcart.
+     * @param item_added $event
+     * @return void
+     */
+    public static function shoppingcart_item_added(item_added $event) {
+        $eventdata = $event->get_data();
+        if (
+            empty($eventdata)
+            || ($eventdata['other']['component'] ?? null) !== 'mod_booking'
+        ) {
+            return;
+        }
+        // Any data that is stored in a form is deleted from the cache if an item is added to the shoppingcart.
+        $customformstore = new customformstore($eventdata['userid'], $eventdata['other']['itemid']);
+        $customformstore->delete_customform_data();
+        return;
+    }
+
+    /**
+     * Observer for the competency_updated event.
+     *
+     * @param \core\event\competency_updated $event
+     */
+    public static function competency_updated(\core\event\competency_updated $event): void {
+        $competencyid = (int)$event->objectid;
+        cache_helper::invalidate_by_event('setbackcompetenciesshortnamescache', [$competencyid]);
+    }
+
+    /**
+     * Observer for the competency_deleted event.
+     *
+     * @param \core\event\competency_deleted $event
+     */
+    public static function competency_deleted(\core\event\competency_deleted $event): void {
+        cache_helper::purge_by_event('setbackusercompetenciescache');
+    }
+
+    /**
+     * Observer for the competency_user_competency_rated event.
+     *
+     * @param \core\event\competency_user_competency_rated $event
+     */
+    public static function competency_user_competency_rated(\core\event\competency_user_competency_rated $event): void {
+        $userid = (int)$event->relateduserid;
+        cache_helper::invalidate_by_event('setbackusercompetenciescache', [$userid]);
+    }
+
+    /**
+     * Observer for the competency_user_competency_rated_in_plan event.
+     *
+     * @param \core\event\competency_user_competency_rated_in_plan $event
+     */
+    public static function competency_user_competency_rated_in_plan(
+        \core\event\competency_user_competency_rated_in_plan $event
+    ): void {
+        $userid = (int)$event->relateduserid;
+        cache_helper::invalidate_by_event('setbackusercompetenciescache', [$userid]);
+    }
+
+    /**
+     * Observer for the competency_user_competency_rated_in_course event.
+     *
+     * @param \core\event\competency_user_competency_rated_in_course $event
+     */
+    public static function competency_user_competency_rated_in_course(
+        \core\event\competency_user_competency_rated_in_course $event
+    ): void {
+        $userid = (int)$event->relateduserid;
+        cache_helper::invalidate_by_event('setbackusercompetenciescache', [$userid]);
     }
 }

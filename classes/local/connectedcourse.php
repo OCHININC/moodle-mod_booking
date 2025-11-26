@@ -48,7 +48,7 @@ class connectedcourse {
      */
     public static function create_course_from_template_course(stdClass &$newoption, stdClass &$formdata) {
 
-        global $DB;
+        global $DB, $USER;
 
         $settings = singleton_service::get_instance_of_booking_option_settings($formdata->id);
 
@@ -79,12 +79,24 @@ class connectedcourse {
 
         $categoryid = self::retrieve_categoryid($newoption, $formdata);
 
+        $options = [];
+
+        if (empty($formdata->createnewmoodlecoursefromtemplatewithusers)) {
+            $options[] = ['name' => 'users', 'value' => false];
+            $options[] = ['name' => 'role_assignments', 'value' => false];
+        }
+
+        // We need to switch the user.
+        $previoususer = $USER;
+        $USER = get_admin();
+
         $courseinfo = core_course_external::duplicate_course(
             $origincourseid,
             $fullnamewithprefix,
             $shortname,
             $categoryid,
-            1
+            1,
+            $options
         );
         if (!empty($courseinfo["id"])) {
             $newoption->courseid = $courseinfo["id"];
@@ -95,6 +107,9 @@ class connectedcourse {
 
             \core_tag_tag::delete_instances_by_id(array_keys($tags));
         }
+
+        $USER = $previoususer;
+        fix_course_sortorder();
     }
 
     /**
@@ -113,7 +128,7 @@ class connectedcourse {
                 break;
             case 1:
                 // Choose a Moodle course.
-                $newoption->courseid = $formdata->courseid ?: 0;
+                $newoption->courseid = $formdata->courseid ?? 0;
                 break;
             case 2:
                 // Create new Moodle course.
@@ -135,10 +150,14 @@ class connectedcourse {
      */
     private static function retrieve_categoryid(stdClass &$newoption, stdClass &$formdata) {
 
-        global $DB;
+        global $DB, $COURSE;
 
         $config = get_config('booking', 'newcoursecategorycfield');
-        if (!empty($config) && $config !== "-1") {
+        if (
+            !empty($config)
+            && $config !== "-1"
+            && $config !== "currentcategory"
+        ) {
             // FEATURE add more settingfields add customfield_ to ...
             // ... settingsvalue from customfields allwo only Textfields or Selects.
             $cfforcategory = 'customfield_' . get_config('booking', 'newcoursecategorycfield');
@@ -174,6 +193,8 @@ class connectedcourse {
                     $categoryid = $categories[0]['id'];
                 }
             }
+        } else if ($config == "currentcategory") {
+            $categoryid = $COURSE->category;
         }
 
         if (!isset($categoryid)) {
@@ -229,15 +250,27 @@ class connectedcourse {
      * @return array
      */
     public static function return_tagged_template_courses(string $query = '') {
-        global $DB;
+        global $DB, $USER;
         $where = "c.id IN (SELECT t.itemid FROM {tag_instance} t";
         $configs = get_config('booking', 'templatetags');
-
         if (empty($configs)) {
             return [];
         }
+        $configsarray = explode(',', str_replace(' ', '', $configs));
+        if (count($configsarray) == 1 && $configsarray[0] == "0") {
+            return [];
+        }
+        // Use array_filter to remove the "0" strings ("notags" option).
+        $configsarray = array_filter($configsarray, function ($value) {
+            return $value != "0";
+        });
+        // Reset array keys to get a consecutive index starting from 0.
+        $configsarray = array_values($configsarray);
+        if (empty($configsarray)) {
+            return [];
+        }
         // Search courses that are tagged with the specified tag.
-        $configtags['OR'] = explode(',', str_replace(' ', '', $configs));
+        $configtags['OR'] = $configsarray;
 
         $params = [];
 
@@ -285,9 +318,7 @@ class connectedcourse {
             $context = context_course::instance($course->id);
             if (
                 !has_capability('moodle/course:view', $context)
-                || !has_capability('moodle/backup:backupcourse', $context)
-                || !has_capability('moodle/restore:restorecourse', $context)
-                || !has_capability('moodle/question:add', $context)
+                && !is_enrolled($context, $USER->id)
             ) {
                 unset($courses[$key]);
             }
@@ -310,7 +341,7 @@ class connectedcourse {
                 JOIN {context} ctx ON c.id = ctx.instanceid
                 AND ctx.contextlevel = :contextcourse
                 WHERE " .
-                $whereclause . "ORDER BY c.sortorder";
+                $whereclause . " ORDER BY c.sortorder ";
         $list = $DB->get_records_sql(
             $sql,
             ['contextcourse' => CONTEXT_COURSE] + $params

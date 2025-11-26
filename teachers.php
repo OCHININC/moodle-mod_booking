@@ -53,16 +53,53 @@ $PAGE->add_body_class('page-mod-booking-allteachers');
 echo $OUTPUT->header();
 
 $teacherids = [];
+$params = [];
 
 // Now get all teachers that we're interested in.
-$sqlteachers =
-    "SELECT DISTINCT bt.userid, u.firstname, u.lastname, u.email
-    FROM {booking_teachers} bt
-    LEFT JOIN {user} u
-    ON u.id = bt.userid
-    ORDER BY u.lastname ASC";
+$bookinginstances = explode(',', get_config('booking', 'allteacherspagebookinginstances'));
 
-if ($teacherrecords = $DB->get_records_sql($sqlteachers)) {
+if (
+    empty($bookinginstances)
+    || !is_array($bookinginstances)
+    || (
+        count($bookinginstances) == 1
+        && $bookinginstances[0] == 0
+    )
+) {
+    // Now get ALL teachers.
+    $sqlteachers =
+        "SELECT DISTINCT bt.userid, u.firstname, u.lastname, u.email
+        FROM {booking_teachers} bt
+        LEFT JOIN {user} u
+        ON u.id = bt.userid
+        ORDER BY u.lastname ASC";
+} else {
+    if (has_capability('mod/booking:updatebooking', $context)) {
+        // If the user has the capability to manage bookings, we show a warning.
+        $linktosetting = new moodle_url(
+            '/admin/settings.php',
+            ['section' => 'modsettingbooking'],
+            'admin-allteacherspagebookinginstances'
+        );
+        echo "<div class='alert alert-warning'>" .
+            "<i class='fa fa-lightbulb-o' aria-hidden='true'></i>&nbsp;" .
+            get_string('warningonlyteachersofselectedinstances', 'mod_booking', $linktosetting) .
+        "</div>";
+    }
+
+    [$insql, $params] = $DB->get_in_or_equal($bookinginstances, SQL_PARAMS_NAMED);
+    // In this case, we only want teachers from the selected booking instances.
+    $sqlteachers =
+        "SELECT DISTINCT bt.userid, u.firstname, u.lastname, u.email
+        FROM {booking} b
+        JOIN {booking_options} bo ON bo.bookingid = b.id
+        JOIN {booking_teachers} bt ON bt.optionid = bo.id
+        JOIN {user} u ON u.id = bt.userid
+        WHERE b.id $insql
+        ORDER BY u.lastname ASC";
+}
+
+if ($teacherrecords = $DB->get_records_sql($sqlteachers, $params)) {
     foreach ($teacherrecords as $teacherrecord) {
         $teacherids[] = $teacherrecord->userid;
     }
@@ -70,6 +107,7 @@ if ($teacherrecords = $DB->get_records_sql($sqlteachers)) {
 
 // Now prepare the data for all teachers.
 $data = new page_allteachers($teacherids);
+/** @var \mod_booking\output\renderer $output */
 $output = $PAGE->get_renderer('mod_booking');
 
 // And return the rendered page showing all teachers.

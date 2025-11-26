@@ -36,6 +36,7 @@ use local_shopping_cart\shopping_cart_history;
 use local_shopping_cart\local\cartstore;
 use local_shopping_cart\output\shoppingcart_history_list;
 use stdClass;
+use tool_mocktesttime\time_mock;
 
 defined('MOODLE_INTERNAL') || die();
 global $CFG;
@@ -57,17 +58,20 @@ final class condition_all_test extends advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest(true);
+        time_mock::init();
+        time_mock::set_mock_time(strtotime('now'));
+        singleton_service::destroy_instance();
     }
 
     /**
      * Test booking, cancelation, option has started etc.
      *
-     * @covers \condition\bookitbutton::is_available
-     * @covers \condition\alreadybooked::is_available
-     * @covers \condition\fullybooked::is_available
-     * @covers \condition\confirmation::render_page
-     * @covers \condition\notifymelist::is_available
-     * @covers \condition\isloggedin::is_available
+     * @covers \mod_booking\bo_availability\conditions\bookitbutton::is_available
+     * @covers \mod_booking\bo_availability\conditions\alreadybooked::is_available
+     * @covers \mod_booking\bo_availability\conditions\fullybooked::is_available
+     * @covers \mod_booking\bo_availability\conditions\confirmation::render_page
+     * @covers \mod_booking\bo_availability\conditions\notifymelist::is_available
+     * @covers \mod_booking\bo_availability\conditions\isloggedin::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -155,7 +159,7 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test of booking option with price as well as cancellation by user.
      *
-     * @covers \condition\priceset::is_available
+     * @covers \mod_booking\bo_availability\conditions\priceisset::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -305,7 +309,7 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test of booking option with zero price as different displayemptyprice settings.
      *
-     * @covers \condition\priceset::is_available
+     * @covers \mod_booking\bo_availability\conditions\priceisset::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -460,6 +464,12 @@ final class condition_all_test extends advanced_testcase {
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student2->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
+        // Verify that correct price category is stored in DB.
+        $student2answer = $DB->get_record('booking_answers', ['userid' => $student2->id, 'optionid' => $settings->id]);
+        $pricecat = singleton_service::get_pricecategory_for_user($student2);
+        $this->assertEquals($pricecat, $student2answer->pricecategory);
+        $this->assertEquals('zeroprice', $student2answer->pricecategory);
+
         // Mandatory clean-up.
         singleton_service::get_instance()->userpricecategory = [];
     }
@@ -467,7 +477,7 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test of booking option with fallback different displayemptyprice settings.
      *
-     * @covers \condition\priceset::is_available
+     * @covers \mod_booking\bo_availability\conditions\priceisset::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -711,12 +721,12 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test booking, cancelation, option has started etc.
      *
-     * @covers \condition\bookitbutton::is_available
-     * @covers \condition\alreadybooked::is_available
-     * @covers \condition\fullybooked::is_available
-     * @covers \condition\confirmation::render_page
-     * @covers \condition\notifymelist::is_available
-     * @covers \condition\isloggedin::is_available
+     * @covers \mod_booking\bo_availability\conditions\bookitbutton::is_available
+     * @covers \mod_booking\bo_availability\conditions\alreadybooked::is_available
+     * @covers \mod_booking\bo_availability\conditions\fullybooked::is_available
+     * @covers \mod_booking\bo_availability\conditions\confirmation::render_page
+     * @covers \mod_booking\bo_availability\conditions\notifymelist::is_available
+     * @covers \mod_booking\bo_availability\conditions\isloggedin::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -738,6 +748,7 @@ final class condition_all_test extends advanced_testcase {
         $student2 = $this->getDataGenerator()->create_user();
         $student3 = $this->getDataGenerator()->create_user();
         $student4 = $this->getDataGenerator()->create_user();
+        $student5 = $this->getDataGenerator()->create_user();
         $teacher = $this->getDataGenerator()->create_user();
         $bookingmanager = $this->getDataGenerator()->create_user(); // Booking manager.
 
@@ -752,6 +763,7 @@ final class condition_all_test extends advanced_testcase {
         $this->getDataGenerator()->enrol_user($student2->id, $course->id);
         $this->getDataGenerator()->enrol_user($student3->id, $course->id);
         $this->getDataGenerator()->enrol_user($student4->id, $course->id);
+        $this->getDataGenerator()->enrol_user($student5->id, $course->id);
         $this->getDataGenerator()->enrol_user($teacher->id, $course->id);
         $this->getDataGenerator()->enrol_user($bookingmanager->id, $course->id);
 
@@ -846,25 +858,46 @@ final class condition_all_test extends advanced_testcase {
         $this->setUser($student3);
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student3->id, false);
 
-        // Bookitbutton blocks.
+        // Book student3 is on waitinglist.
+        // Bookitbutton should NOT block if there are places on waitinglist.
         $result = booking_bookit::bookit('option', $settings->id, $student3->id);
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student3->id, false);
-
-        // Now student3 is on waitinglist.
-        $result = booking_bookit::bookit('option', $settings->id, $student3->id);
-        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student3->id, false);
-
-        // User really is booked to waitinglist.
         $this->assertEquals(MOD_BOOKING_BO_COND_ONWAITINGLIST, $id);
 
-        // Use notification list.
-        $res = set_config('usenotificationlist', 1, 'booking');
-
+        // Waitinglist is full, no further user can be booked.
         $this->setUser($student4);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student4->id, false);
+        $this->assertEquals(MOD_BOOKING_BO_COND_FULLYBOOKED, $id);
 
-        // Now student4 is on notification list.
+        // Now we set waitinglist to unlimited.
+        $this->setAdminUser();
+        $record->id = $option1->id;
+        $record->maxoverbooking = -1;
+        $record->cmid = $settings->cmid;
+        booking_option::update($record);
+
+        // And try again to book user4 again.
+        $this->setUser($student4);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student4->id, false);
+        // The confirmation for waitinglist is coming from MOD_BOOKING_BO_COND_ASKFORCONFIRMATION.
+        $this->assertEquals(MOD_BOOKING_BO_COND_ASKFORCONFIRMATION, $id);
         $result = booking_bookit::bookit('option', $settings->id, $student4->id);
         [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student4->id, false);
+        $this->assertEquals(MOD_BOOKING_BO_COND_ONWAITINGLIST, $id);
+
+        // Make sure, waitinglist is full and use notification list.
+        $this->setAdminUser();
+        $record->id = $option1->id;
+        $record->maxoverbooking = 2;
+        $record->cmid = $settings->cmid;
+        booking_option::update($record);
+        $res = set_config('usenotificationlist', 1, 'booking');
+
+        $this->setUser($student5);
+
+        // Now student4 is on notification list.
+        $result = booking_bookit::bookit('option', $settings->id, $student5->id);
+        [$id, $isavailable, $description] = $boinfo->is_available($settings->id, $student5->id, false);
 
         // User really is booked to notifylist.
         $this->assertEquals(MOD_BOOKING_BO_COND_NOTIFYMELIST, $id);
@@ -873,7 +906,7 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test of booking option availability by cohorts and bookingtime.
      *
-     * @covers \condition\boking_time::is_available
+     * @covers \mod_booking\bo_availability\conditions\booking_time::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -1000,8 +1033,9 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test enrol user and add to group.
      *
-     * @covers \booking_option->enrol_user
-     * @covers \option\fields\addtogroup::save_data
+     * @covers \mod_booking\booking_bookit::bookit
+     * @covers \mod_booking\booking_option::enrol_user
+     * @covers \mod_booking\option\fields\addtogroup::save_data
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -1101,7 +1135,7 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test add to group.
      *
-     * @covers \condition\boking_time::is_available
+     * @covers \mod_booking\bo_availability\conditions\booking_time::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -1179,10 +1213,10 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test add to group.
      *
-     * @covers \condition\alreadybooked::is_available
-     * @covers \condition\confirmation::is_available
-     * @covers \condition\onwaitinglist::is_available
-     * @covers \condition\askforconfirmation::render_page
+     * @covers \mod_booking\bo_availability\conditions\alreadybooked::is_available
+     * @covers \mod_booking\bo_availability\conditions\confirmation::is_available
+     * @covers \mod_booking\bo_availability\conditions\onwaitinglist::is_available
+     * @covers \mod_booking\bo_availability\conditions\askforconfirmation::render_page
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -1263,9 +1297,9 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test add to group.
      *
-     * @covers \condition\askforconfirmation::is_available
-     * @covers \condition\onwaitinglist::is_available
-     * @covers \condition\priceset::is_available
+     * @covers \mod_booking\bo_availability\conditions\askforconfirmation::is_available
+     * @covers \mod_booking\bo_availability\conditions\onwaitinglist::is_available
+     * @covers \mod_booking\bo_availability\conditions\priceisset::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -1478,8 +1512,8 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test booking option availability: \condition\bookwithcredits.
      *
-     * @covers \condition\bookwithcredits::is_available
-     * @covers \condition\confirmbookwithcredits::is_available
+     * @covers \mod_booking\bo_availability\conditions\bookwithcredits::is_available
+     * @covers \mod_booking\bo_availability\conditions\confirmbookwithcredits::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -1593,9 +1627,9 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test overbooking with price when confirmation and waiting list disabled.
      *
-     * @covers \condition\askforconfirmation::is_available
-     * @covers \condition\onwaitinglist::is_available
-     * @covers \condition\priceset::is_available
+     * @covers \mod_booking\bo_availability\conditions\askforconfirmation::is_available
+     * @covers \mod_booking\bo_availability\conditions\onwaitinglist::is_available
+     * @covers \mod_booking\bo_availability\conditions\priceisset::is_available
      *
      * @param array $bdata
      * @throws \coding_exception
@@ -1723,11 +1757,12 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test overlapping.
      *
-     * @covers \condition\isbookable::is_available
-     * @covers \condition\bookitbutton::is_available
-     * @covers \condition\alreadybooked::is_available
-     * @covers \condition\overlapping::is_available
-     * @covers \condition\overlappingproxy::is_available
+     * @covers \mod_booking\bo_availability\conditions\isbookable::is_available
+     * @covers \mod_booking\bo_availability\conditions\bookitbutton::is_available
+     * @covers \mod_booking\bo_availability\conditions\alreadybooked::is_available
+     * @covers \mod_booking\bo_availability\conditions\nooverlapping::is_available
+     * @covers \mod_booking\bo_availability\conditions\nooverlappingproxy::is_available
+     *
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -1821,7 +1856,7 @@ final class condition_all_test extends advanced_testcase {
         [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
-        singleton_service::destroy_answers_for_user($student1->id);
+        singleton_service::destroy_answers_for_user($student1->id); // Destroy all answers for this user.
         // Now try to book an option that doesn't contain the nooverlapping flab BUT overlaps with previously booked option 3.
         [$id, $isavailable, $description] = $boinfo4->is_available($settings4->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_JSON_NOOVERLAPPINGPROXY, $id);
@@ -1830,11 +1865,12 @@ final class condition_all_test extends advanced_testcase {
     /**
      * Test overlapping.
      *
-     * @covers \condition\isbookable::is_available
-     * @covers \condition\bookitbutton::is_available
-     * @covers \condition\alreadybooked::is_available
-     * @covers \condition\overlapping::is_available
-     * @covers \condition\overlappingproxy::is_available
+     * @covers \mod_booking\bo_availability\conditions\isbookable::is_available
+     * @covers \mod_booking\bo_availability\conditions\bookitbutton::is_available
+     * @covers \mod_booking\bo_availability\conditions\alreadybooked::is_available
+     * @covers \mod_booking\bo_availability\conditions\nooverlapping::is_available
+     * @covers \mod_booking\bo_availability\conditions\nooverlappingproxy::is_available
+     *
      * @param array $bdata
      * @throws \coding_exception
      * @throws \dml_exception
@@ -1961,8 +1997,9 @@ final class condition_all_test extends advanced_testcase {
         [$id, $isavailable, $description] = $boinfo3->is_available($settings3->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_ALREADYBOOKED, $id);
 
-        singleton_service::destroy_answers_for_user($student1->id);
-        // Now try to book an option that doesn't contain the nooverlapping flab BUT overlaps with previously booked option 3.
+        singleton_service::destroy_answers_for_user($student1->id); // Destroy all answers for this user.
+
+        // Now try to book an option that doesn't contain the nooverlapping flag BUT overlaps with previously booked option 3.
         [$id, $isavailable, $description] = $boinfo4->is_available($settings4->id, $student1->id, true);
         $this->assertEquals(MOD_BOOKING_BO_COND_JSON_NOOVERLAPPINGPROXY, $id);
 
@@ -2006,5 +2043,6 @@ final class condition_all_test extends advanced_testcase {
         parent::tearDown();
         // Mandatory clean-up.
         singleton_service::destroy_instance();
+        cartstore::reset();
     }
 }

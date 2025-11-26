@@ -41,22 +41,17 @@ $urlparams = [];
 
 if (empty($cmid) && empty($contextid)) {
     $contextid = context_system::instance()->id;
-} else {
-    if (!empty($cmid)) {
-        [$course, $cm] = get_course_and_cm_from_cmid($cmid, 'booking');
-        require_course_login($course, false, $cm);
-        $context = context_module::instance($cmid);
-        $contextid = $context->id;
-        $urlparams = ['cmid' => $cmid];
-    } else {
-        $contextid = $contextid;
-    }
+} else if (!empty($cmid)) {
+    [$course, $cm] = get_course_and_cm_from_cmid($cmid, 'booking');
+    require_course_login($course, false, $cm);
+    $context = context_module::instance($cmid);
+    $contextid = $context->id;
+    $urlparams = ['cmid' => $cmid];
 }
 
 if (empty($urlparams)) {
     $urlparams = ['contextid' => 1];
 }
-
 
 $context = context::instance_by_id($contextid);
 
@@ -71,8 +66,10 @@ $PAGE->set_url($url);
 $PAGE->activityheader->disable();
 
 if ($contextid == 1) {
-    admin_externalpage_setup('modbookingeditrules');
-    $PAGE->set_pagelayout('admin');
+    if (is_siteadmin()) {
+        admin_externalpage_setup('modbookingeditrules');
+    }
+    $PAGE->set_pagelayout('standard');
 } else {
     $PAGE->set_pagelayout('standard');
 }

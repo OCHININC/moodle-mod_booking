@@ -26,6 +26,8 @@
 
 namespace mod_booking;
 
+use tool_mocktesttime\time_mock;
+
 defined('MOODLE_INTERNAL') || die();
 
 use advanced_testcase;
@@ -51,12 +53,27 @@ final class lib_test extends advanced_testcase {
     public function setUp(): void {
         parent::setUp();
         $this->resetAfterTest(true);
+        time_mock::init();
+        time_mock::set_mock_time(strtotime('now'));
+        singleton_service::destroy_instance();
+    }
+
+    /**
+     * Mandatory clean-up after each test.
+     */
+    public function tearDown(): void {
+        global $DB;
+
+        parent::tearDown();
+        // Mandatory clean-up.
+        singleton_service::destroy_instance();
     }
 
     /**
      * Test adding teacher to event and group.
      *
-     * @covers ::subscribe_teacher_to_booking_option
+     * @covers \mod_booking\teachers_handler::subscribe_teacher_to_booking_option
+     *
      * @throws \coding_exception
      * @throws \dml_exception
      */
