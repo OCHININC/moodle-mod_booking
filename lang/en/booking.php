@@ -1895,6 +1895,9 @@ $string['optiontemplatename'] = 'Option template name';
 $string['optiontemplatenotsavednovalidlicense'] = 'Booking option template could not be saved as template.
                                                   Upgrade to PRO version to save an unlimited number of templates.';
 $string['optiontemplatessettings'] = 'Booking option templates';
+$string['optiontimezone'] = 'Session Display timezone';
+$string['optiontimezone_help'] = 'Select the timezone in which session times should be displayed. Leave as "User\'s timezone" to display times in each user\'s own timezone. Choose a specific timezone to display all times in that timezone (useful for events in a specific location).';
+$string['usertimezone'] = 'User\'s timezone (default)';
 $string['optionviewcustomfields'] = 'Show customfields on detail page';
 $string['optionviewcustomfieldsdesc'] = 'Select the booking option customfields that you want to be shown on the details page of a booking option. To change the order of the customfields on the details page, you can just change the order of the customfields <a href="/mod/booking/customfield.php" target="_blank">here</a>';
 $string['optionvisibility'] = 'Visibility';

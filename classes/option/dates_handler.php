@@ -453,7 +453,8 @@ class dates_handler {
         bool $showweekdays = true
     ): string {
 
-        $date = self::prettify_datetime($starttimestamp, $endtimestamp, $lang, $showweekdays);
+        // This is a utility function without booking option context, so use user's timezone.
+        $date = self::prettify_datetime($starttimestamp, $endtimestamp, $lang, $showweekdays, false, null);
 
         $prettifiedstring = $date->datestring;
 
@@ -771,13 +772,17 @@ class dates_handler {
 
             $formattedsession = new stdClass();
 
+            // Get timezone from settings if available.
+            $timezone = $settings->optiontimezone ?? null;
+
             foreach ($settings->sessions as $session) {
                 $data = self::prettify_datetime(
                     $session->coursestarttime,
                     $session->courseendtime,
                     $lang,
                     $showweekdays,
-                    $ashtml
+                    $ashtml,
+                    $timezone
                 );
                 $data->id = $session->id;
                 $sessions[] = $data;
@@ -792,7 +797,9 @@ class dates_handler {
                 $settings->coursestarttime,
                 $settings->courseendtime,
                 $lang,
-                $showweekdays
+                $showweekdays,
+                false,
+                $settings->optiontimezone ?? null
             );
             $data->id = 0;
             $sessions[] = $data;
@@ -817,7 +824,8 @@ class dates_handler {
         int $endtime = 0,
         string $lang = '',
         bool $showweekdays = false,
-        bool $ashtml = false
+        bool $ashtml = false,
+        ?string $timezone = null
     ): stdClass {
         if ($lang === '') {
             $lang = current_language();
@@ -848,11 +856,14 @@ class dates_handler {
         }
         $h = $cache['strings']['h'];
 
+        // Determine timezone: use provided timezone or fall back to user's timezone (99).
+        $tz = $timezone ?? 99;
+
         // Helper closure for caching userdate results.
-        $getdate = function (int $ts, $format) use ($lang, &$cache) {
-            $key = $ts . '|' . (string)$format . '|' . $lang;
+        $getdate = function (int $ts, $format) use ($lang, $tz, $timezone, &$cache) {
+            $key = $ts . '|' . (string)$format . '|' . $lang . '|' . ($timezone ?? 'user');
             if (!isset($cache['dates'][$key])) {
-                $cache['dates'][$key] = userdate($ts, $format);
+                $cache['dates'][$key] = userdate($ts, $format, $tz);
             }
             return $cache['dates'][$key];
         };
@@ -893,6 +904,26 @@ class dates_handler {
                 : $date->endtime . $h;
         }
 
+        // Add timezone abbreviation if timezone was specified.
+        if (!empty($timezone)) {
+            try {
+                $tzobj = new \DateTimeZone($timezone);
+                $dt = new \DateTime('@' . $starttime);
+                $dt->setTimezone($tzobj);
+                $tzabbr = $dt->format('T'); // Gets abbreviation like "PST", "EST".
+
+                // Append timezone abbreviation to datestring.
+                $date->datestring .= ' ' . $tzabbr;
+
+                // Store timezone info for templates.
+                $date->timezone = $timezone;
+                $date->timezoneabbr = $tzabbr;
+            } catch (\Exception $e) {
+                // If timezone is invalid, log and continue without abbreviation.
+                debugging('Invalid timezone: ' . $timezone, DEBUG_DEVELOPER);
+            }
+        }
+
         return $date;
     }
 
@@ -915,7 +946,8 @@ class dates_handler {
             $slotstarttime = $starttime;
             $slotendtime = strtotime("+ $duration minutes ", $starttime);
             $starttime = $slotendtime; // New starttime previous slotendtime.
-            $slots[] = self::prettify_datetime($slotstarttime, $slotendtime);
+            // Utility function without booking option context, use user's timezone.
+            $slots[] = self::prettify_datetime($slotstarttime, $slotendtime, '', false, false, null);
         }
 
         return $slots;

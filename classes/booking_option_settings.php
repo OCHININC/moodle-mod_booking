@@ -233,6 +233,9 @@ class booking_option_settings {
     /** @var string $dayofweek */
     public $dayofweek = null;
 
+    /** @var string $optiontimezone Optional timezone identifier for displaying times */
+    public $optiontimezone = null;
+
     /** @var string $availability in json format */
     public $availability = null;
 
@@ -454,6 +457,7 @@ class booking_option_settings {
             $this->timemadevisible = $dbrecord->timemadevisible;
             $this->annotation = $dbrecord->annotation;
             $this->dayofweek = $dbrecord->dayofweek;
+            $this->optiontimezone = $dbrecord->optiontimezone ?? null;
             $this->availability = $dbrecord->availability;
             $this->status = $dbrecord->status;
             $this->responsiblecontact = !empty($dbrecord->responsiblecontact) ? explode(',', $dbrecord->responsiblecontact) : [];
