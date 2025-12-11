@@ -371,8 +371,17 @@ class subbooking_timeslot implements booking_subbooking {
 
         $settings = singleton_service::get_instance_of_booking_option_settings($this->optionid);
 
+        $timezone = $settings->optiontimezone ?? null;
+
         foreach ($settings->sessions as $session) {
-            $date = dates_handler::prettify_datetime($session->coursestarttime, $session->courseendtime);
+            $date = dates_handler::prettify_datetime(
+                $session->coursestarttime,
+                $session->courseendtime,
+                '',
+                false,
+                false,
+                $timezone
+            );
 
             $data['days'][] = [
                 "day" => $date->startdate,

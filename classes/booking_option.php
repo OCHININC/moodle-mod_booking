@@ -3294,7 +3294,15 @@ class booking_option {
         // Else, we check if there are sessions.
         // If not, we just use normal coursestart & endtime.
         if ($bookingevent) {
-            $data = dates_handler::prettify_datetime($bookingevent->coursestarttime, $bookingevent->courseendtime);
+            $timezone = $this->settings->optiontimezone ?? null;
+            $data = dates_handler::prettify_datetime(
+                $bookingevent->coursestarttime,
+                $bookingevent->courseendtime,
+                '',
+                false,
+                false,
+                $timezone
+            );
             $data->id = $bookingevent->id;
             $sessions = [$data];
         } else {

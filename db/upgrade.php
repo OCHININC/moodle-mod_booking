@@ -5120,7 +5120,21 @@ function xmldb_booking_upgrade($oldversion) {
         }
 
         // Booking savepoint reached.
-        upgrade_mod_savepoint(true, 2025112500, 'booking'); // Update to your new version number.
+        upgrade_mod_savepoint(true, 2025112500, 'booking');
+    }
+
+    if ($oldversion < 2025120501) {
+        // Define field optiontimezone to be added to booking_options.
+        $table = new xmldb_table('booking_options');
+        $field = new xmldb_field('optiontimezone', XMLDB_TYPE_CHAR, '100', null, null, null, null, 'competencies');
+
+        // Conditionally launch add field optiontimezone.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Booking savepoint reached.
+        upgrade_mod_savepoint(true, 2025120501, 'booking');
     }
 
     return true;

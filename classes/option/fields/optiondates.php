@@ -313,9 +313,14 @@ class optiondates extends field_base {
         $returndates = [];
         foreach ($dates as $date) {
             $date = (object)$date;
+            // For change logs, use user's timezone (null) for consistency.
             $d = dates_handler::prettify_datetime(
                 (int)$date->coursestarttime,
-                (int)$date->courseendtime
+                (int)$date->courseendtime,
+                '',
+                false,
+                false,
+                null
             );
             $datestring = $d->datestring;
             if (!empty($date->entityid)) {
