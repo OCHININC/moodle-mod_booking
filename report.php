@@ -708,6 +708,14 @@ if (!$tableallbookings->is_downloading()) {
                     $columns[] = 'allusercertificates';
                 }
                 break;
+            case 'courseenrolmethod':
+                $columns[] = 'courseenrolmethod';
+                $headers[] = get_string('courseenrolmethod', 'mod_booking');
+                break;
+            case 'bookingsource':
+                $columns[] = 'bookingsource';
+                $headers[] = get_string('bookingsource', 'mod_booking');
+                break;
         }
     }
     $customfields = '';
@@ -857,11 +865,66 @@ if (!$tableallbookings->is_downloading()) {
             ba.notes,
             ba.places,
             \'\' otheroptions,
-            ba.numrec' . $customfields . $shoppingcartfields . $certificatefields;
+            ba.numrec,
+            ue.enrolmethod AS courseenrolmethod,
+            ue.cohortid,
+            CASE
+                WHEN ba.frombookingid > 0 THEN \'transferred\'
+                WHEN ba.waitinglist = 2 THEN \'reserved\'
+                WHEN bh.usermodified = ba.userid THEN \'self\'
+                WHEN bh.usermodified != ba.userid THEN \'manager\'
+                ELSE \'self\'
+            END AS bookingsource' . $customfields . $shoppingcartfields . $certificatefields;
     $from = ' {booking_answers} ba
             JOIN {user} u ON u.id = ba.userid
             JOIN {booking_options} bo ON bo.id = ba.optionid
-            LEFT JOIN {booking_options} otherbookingoption ON otherbookingoption.id = ba.frombookingid ' . $shoppingcartfrom
+            JOIN {booking} b ON b.id = bo.bookingid
+            LEFT JOIN {booking_options} otherbookingoption ON otherbookingoption.id = ba.frombookingid
+            LEFT JOIN (
+                SELECT ue1.userid, e1.courseid, e1.enrol AS enrolmethod,
+                       e1.customint1 AS cohortid,
+                       CASE e1.enrol
+                           WHEN \'cohort\' THEN 1
+                           WHEN \'manual\' THEN 2
+                           WHEN \'self\' THEN 3
+                           ELSE 4
+                       END AS priority
+                FROM {user_enrolments} ue1
+                JOIN {enrol} e1 ON e1.id = ue1.enrolid
+                WHERE e1.status = 0
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM {user_enrolments} ue2
+                    JOIN {enrol} e2 ON e2.id = ue2.enrolid
+                    WHERE e2.courseid = e1.courseid
+                    AND ue2.userid = ue1.userid
+                    AND e2.status = 0
+                    AND (
+                        CASE e2.enrol
+                            WHEN \'cohort\' THEN 1
+                            WHEN \'manual\' THEN 2
+                            WHEN \'self\' THEN 3
+                            ELSE 4
+                        END < CASE e1.enrol
+                            WHEN \'cohort\' THEN 1
+                            WHEN \'manual\' THEN 2
+                            WHEN \'self\' THEN 3
+                            ELSE 4
+                        END
+                    )
+                )
+            ) ue ON ue.courseid = b.course AND ue.userid = ba.userid
+            LEFT JOIN (
+                SELECT bh1.answerid, bh1.userid, bh1.usermodified
+                FROM {booking_history} bh1
+                WHERE bh1.status = 0
+                AND bh1.timecreated = (
+                    SELECT MIN(bh2.timecreated)
+                    FROM {booking_history} bh2
+                    WHERE bh2.answerid = bh1.answerid
+                    AND bh2.status = 0
+                )
+            ) bh ON bh.answerid = ba.id ' . $shoppingcartfrom
             . $certificatefrom;
 
     // With the shared places feature, we get more than one option.
