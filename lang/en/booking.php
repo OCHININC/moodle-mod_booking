@@ -2968,6 +2968,15 @@ $string['youareusingconfig'] = 'Your are using the following form configuration:
 $string['yourplaceonwaitinglist'] = 'You are on place {$a} on the waitinglist';
 $string['yourselection'] = 'Your selection';
 $string['zoommeeting'] = 'Zoom meeting';
+$string['courseenrolmethod'] = 'Course enrollment method';
+$string['courseenrolmethod_help'] = 'The enrollment plugin used to enroll the user in the associated course.';
+$string['bookingsource'] = 'Booking source';
+$string['bookingsource_help'] = 'How this user was added to the booking option.';
+$string['bookingsource_self'] = 'Self-booked';
+$string['bookingsource_manager'] = 'Manager-enrolled';
+$string['bookingsource_transferred'] = 'Transferred';
+$string['bookingsource_reserved'] = 'Reserved';
+$string['nocourse'] = 'No course';
 
 // phpcs:disable
 /*$string['ersaverelationsforoptiondates'] = 'Save entity for each date too';

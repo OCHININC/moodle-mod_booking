@@ -525,6 +525,8 @@ class mod_booking_mod_form extends moodleform_mod {
             'email' => get_string('email', 'mod_booking'),
             'certificate' => get_string('certificate', 'mod_booking'),
             'allusercertificates' => get_string('allusercertificates', 'mod_booking'),
+            'courseenrolmethod' => get_string('courseenrolmethod', 'mod_booking'),
+            'bookingsource' => get_string('bookingsource', 'mod_booking'),
         ];
 
         $reportfields = [ // This is the download file.
@@ -546,6 +548,8 @@ class mod_booking_mod_form extends moodleform_mod {
             'notes' => get_string('notes', 'mod_booking'),
             'idnumber' => get_string("idnumber"),
             'timecreated' => get_string('timecreated', 'mod_booking'),
+            'courseenrolmethod' => get_string('courseenrolmethod', 'mod_booking'),
+            'bookingsource' => get_string('bookingsource', 'mod_booking'),
         ];
 
         $optionsfields = [

@@ -133,6 +133,58 @@ class all_userbookings extends \table_sql {
     }
 
     /**
+     * Course enrollment method column.
+     * @param object $values
+     * @return string
+     */
+    protected function col_courseenrolmethod($values) {
+        global $DB;
+
+        if (empty($values->courseenrolmethod)) {
+            return '';
+        }
+
+        $enrolmethod = $values->courseenrolmethod;
+
+        // Custom labels for specific enrollment methods.
+        switch ($enrolmethod) {
+            case 'self':
+                return 'Self Enrolled';
+
+            case 'manual':
+                return 'Manual/Manager Enrolled';
+
+            case 'cohort':
+                // Show the cohort name instead of "Cohort sync".
+                if (!empty($values->cohortid)) {
+                    $cohort = $DB->get_record('cohort', ['id' => $values->cohortid], 'name');
+                    if ($cohort) {
+                        return 'Cohort: ' . format_string($cohort->name);
+                    }
+                }
+                // Fallback if cohort not found.
+                return 'Cohort sync';
+
+            default:
+                // For other enrollment methods, use default plugin name.
+                $pluginname = get_string('pluginname', 'enrol_' . $enrolmethod);
+                return format_string($pluginname);
+        }
+    }
+
+    /**
+     * Booking source column.
+     * @param object $values
+     * @return string
+     */
+    protected function col_bookingsource($values) {
+        $source = $values->bookingsource ?? 'self';
+
+        $stringkey = 'bookingsource_' . $source;
+        return get_string($stringkey, 'mod_booking');
+    }
+
+    /**
      * Fullname column.
      * @param object $values
      * @return string
