@@ -343,6 +343,12 @@ class addbookingoption extends external_api {
                 VALUE_DEFAULT,
                 '{}'
             ),
+            'optiontimezone' => new external_value(
+                PARAM_RAW,
+                'Optional timezone identifier for displaying session times (e.g., America/New_York). Use "99" for user timezone.',
+                VALUE_DEFAULT,
+                ''
+            ),
             ]);
     }
 
@@ -398,6 +404,7 @@ class addbookingoption extends external_api {
      * @param int|null $mergeparam
      * @param string|null $dayofweektime
      * @param string|null $availability
+     * @param string|null $optiontimezone
      * @return array
      * @throws \invalid_parameter_exception
      */
@@ -450,7 +457,8 @@ class addbookingoption extends external_api {
         ?string $recommendedin = null,
         ?int $mergeparam = null,
         ?string $dayofweektime = null,
-        ?string $availability = null
+        ?string $availability = null,
+        ?string $optiontimezone = null
     ): array {
 
         $params = external_api::validate_parameters(
@@ -505,6 +513,7 @@ class addbookingoption extends external_api {
                         'mergeparam' => $mergeparam,
                         'dayofweektime' => $dayofweektime,
                         'availability' => $availability,
+                        'optiontimezone' => $optiontimezone,
             ]
         );
 
