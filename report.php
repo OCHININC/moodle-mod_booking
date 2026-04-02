@@ -856,6 +856,7 @@ if (!$tableallbookings->is_downloading()) {
         $enrolmentfields = ',
             ue.enrolmethod AS courseenrolmethod,
             ue.cohortid';
+        $sqlvalues['enrolcourseid'] = $course->id;
         $enrolmentjoin = '
             LEFT JOIN (
                 SELECT
@@ -875,6 +876,7 @@ if (!$tableallbookings->is_downloading()) {
                 FROM {user_enrolments} ue1
                 JOIN {enrol} e1 ON e1.id = ue1.enrolid
                 WHERE e1.status = 0
+                AND e1.courseid = :enrolcourseid
             ) ue ON ue.courseid = b.course AND ue.userid = ba.userid AND ue.rn = 1';
     }
 
@@ -894,13 +896,14 @@ if (!$tableallbookings->is_downloading()) {
             LEFT JOIN (
                 SELECT bh1.answerid, bh1.userid, bh1.usermodified
                 FROM {booking_history} bh1
+                JOIN (
+                    SELECT answerid, MIN(timecreated) AS min_time
+                    FROM {booking_history}
+                    WHERE status = 0
+                    GROUP BY answerid
+                ) bh_min ON bh1.answerid = bh_min.answerid
+                         AND bh1.timecreated = bh_min.min_time
                 WHERE bh1.status = 0
-                AND bh1.timecreated = (
-                    SELECT MIN(bh2.timecreated)
-                    FROM {booking_history} bh2
-                    WHERE bh2.answerid = bh1.answerid
-                    AND bh2.status = 0
-                )
             ) bh ON bh.answerid = ba.id';
     } else {
         // Provide default empty value when not showing bookingsource.
